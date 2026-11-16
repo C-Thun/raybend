@@ -2,8 +2,8 @@
 
 > 单元：**导入（库外/来源目录）网格的取图与按时间分组**。崔总 2026-10-11 定方案，逐条按回话实施。
 > 三轮把设计写歪过（见文末「走过的弯路」），本文是**最终口径**。
-> 相关：`memory/FUNCTION-BROWSE.md`（按时间分组）、`lib/time-group.ts`（分组算法唯一实现）、
-> 诊断《真机实测》`implementations/2026-10-11_import-still-slow-diagnosis.md`。
+> 相关：`.agents/memory/FUNCTION-BROWSE.md`（按时间分组）、`lib/time-group.ts`（分组算法唯一实现）、
+> 诊断《真机实测》`.agents/implementations/2026-10-11_import-still-slow-diagnosis.md`。
 
 ---
 

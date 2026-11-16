@@ -1,6 +1,6 @@
 # CM-W2：输入配置、线性工作域与正确输出
 
-> 2026-10-04 技术闭环已接通，默认激活受 W3 性能闸门约束；真实 RAW/照片色彩待统一验收。契约见 `color-management.md`，证据见 `../implementations/2026-10-04_color-management-float-gpu-and-persistence.md`。
+> 2026-10-04 技术闭环已接通，默认激活受 W3 性能闸门约束；真实 RAW/照片色彩待统一验收。契约见 `color-management.md`，证据见 `../.agents/implementations/2026-10-04_color-management-float-gpu-and-persistence.md`。
 
 ## 已实现范围
 

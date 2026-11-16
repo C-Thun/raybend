@@ -1,5 +1,5 @@
 /**
- * LUT 库的**形状与纯逻辑**（`design/editor.md` §3.1、`prompts/editor.pd`）。
+ * LUT 库的**形状与纯逻辑**（`design/editor.md` §3.1、`.agents/prompts/editor.pd`）。
  *
  * 只有一级分类（`.pd` 明确「只有一级分类」），每个分类下是若干 LUT 条目：
  *

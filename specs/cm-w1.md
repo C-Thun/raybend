@@ -1,6 +1,6 @@
 # CM-W1：色彩管理接缝与全局设置入口
 
-> 状态：2026-09-30 Agent 实施与自动检查完成；Pencil 最终保存和 Windows 真机观感待崔总复核。记录见 `implementations/2026-09-30_color-management-w1.md`。主题边界见 `specs/color-management.md`；后续波次只在开工时细化。
+> 状态：2026-09-30 Agent 实施与自动检查完成；Pencil 最终保存和 Windows 真机观感待崔总复核。记录见 `.agents/implementations/2026-09-30_color-management-w1.md`。主题边界见 `specs/color-management.md`；后续波次只在开工时细化。
 
 ## 本波交付
 

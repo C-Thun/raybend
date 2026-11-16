@@ -16,7 +16,7 @@
  *   2. 切主题 / 切密度真的换了 `<html>` 上的 data 属性与令牌值
  *   3. 控制台无 error / warning
  *   4. 外壳规则（若页面上有工作流控件）：工具行**跟着工作流显隐**、
- *      无选中时「批量排除」是禁用态（`memory/DESIGN.md` §12.2、`design/main.md` §2.3）
+ *      无选中时「批量排除」是禁用态（`.agents/memory/DESIGN.md` §12.2、`design/main.md` §2.3）
  *   5. 分段（Ark `Splitter`）的面板高度不为 0
  *   6. **导入工作区**（总会导航到应用外壳跑一遍）：右列库区有宽度、
  *      没勾选目录时「导入」禁用且给出原因、建库弹窗能打开且空路径时不可提交
@@ -426,7 +426,7 @@ try {
     }
     if (shell.excludeDisabled === false) {
       problems.push(
-        "没有选中照片时「批量排除」竟然可点（memory/DESIGN.md §12.2 要求禁用）",
+        "没有选中照片时「批量排除」竟然可点（.agents/memory/DESIGN.md §12.2 要求禁用）",
       );
     }
   }
@@ -2524,7 +2524,7 @@ try {
      * 量的是右栏**信息面板**（滚动容器）的左右 padding：
      *   * 宽松档必须**大于**紧凑档（否则就是写死了）；
      *   * 右（滚动侧）要比左**小** —— 原生滚动条画在 padding 外面，
-     *     这里只需留一道窄空隙（--panel-pad-scroll，memory/DESIGN.md §8.9）。
+     *     这里只需留一道窄空隙（--panel-pad-scroll，.agents/memory/DESIGN.md §8.9）。
      *
      * 直接改 data-density 而不是去点标题栏的开关：要验的是「令牌 → padding」这段接线，
      * 开关本身已经在陈列室那段验过了。量完恢复到宽松（后面几段都在宽松档下跑）。
@@ -2627,7 +2627,7 @@ try {
       problems.push("浏览工作区缺中间那列（main）");
     }
     if (!browseWorkspace.hasSearch) {
-      problems.push("浏览左列没有搜索框（memory/FUNCTION-BROWSE.md §4.1）");
+      problems.push("浏览左列没有搜索框（.agents/memory/FUNCTION-BROWSE.md §4.1）");
     }
     if (!browseWorkspace.leftShowsNoRepository) {
       problems.push("浏览器里没有库时，左列应当显示「还没有库」的空态");
@@ -2636,7 +2636,7 @@ try {
       problems.push("浏览网格既没显示空态也没显示载入态 —— 用户会看到一片空白");
     }
     if (browseWorkspace.browseTools === 0) {
-      problems.push("「浏览」工作流下没看到标记工具（筛选开关等，memory/FUNCTION-BROWSE.md §3）");
+      problems.push("「浏览」工作流下没看到标记工具（筛选开关等，.agents/memory/FUNCTION-BROWSE.md §3）");
     }
     if (Object.values(browseWorkspace.organization ?? {}).some((value) => !value)) {
       problems.push("相片整理三入口、标签搜索或共用规则弹窗冒烟失败");

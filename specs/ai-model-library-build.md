@@ -206,4 +206,4 @@ pnpm ai:use -- /absolute/path/to/model-registry
 
 公开与否由崔总决定；本地构建不依赖公开地址。若之后需要公共 HTTP 下载，建议在模型库发布固定版本附件，建立显式源登记/校验，不自动追 `latest`，依据：[GitHub Releases](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases)。该扩展不会把导出步骤塞回软件打包。
 
-实施完成证据：`implementations/2026-10-04_ai-model-registry-optional-build.md` 与 `docs/ai/tinyclip-v1/build-switch-smoke.json`。首次隔离环境依赖安装的完整联网过程未在本轮另行重跑；真实导出使用已核对的固定 CPU 环境和已缓存上游权重。GUI/真实库/安装器验收仍未勾选。
+实施完成证据：`.agents/implementations/2026-10-04_ai-model-registry-optional-build.md` 与 `docs/ai/tinyclip-v1/build-switch-smoke.json`。首次隔离环境依赖安装的完整联网过程未在本轮另行重跑；真实导出使用已核对的固定 CPU 环境和已缓存上游权重。GUI/真实库/安装器验收仍未勾选。

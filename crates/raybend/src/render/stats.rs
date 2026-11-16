@@ -1,6 +1,6 @@
 //! 帧时间统计与 spike 报告（自记录）。
 //!
-//! `memory/PLAN.md` A.2 要的每个数字都由这里落盘成 JSON + Markdown：**能自测的都自测**，
+//! `specs/PLAN.md` A.2 要的每个数字都由这里落盘成 JSON + Markdown：**能自测的都自测**，
 //! 人的操作压到「点几下按钮 + 目视填两格」（M2 计划 §7.6 的原话）。
 //!
 //! 为什么分位数自己算而不是引依赖：样本量小（几百个 `f32`），排序一遍足够，
@@ -208,7 +208,7 @@ pub struct HumanNotes {
 impl SpikeReport {
     /// 报告存到哪里：`<dir>/spike-report.json` 与 `.md`。
     ///
-    /// 返回写好的两个路径。JSON 给程序看，MD 给人看（也便于贴进 `implementations/`）。
+    /// 返回写好的两个路径。JSON 给程序看，MD 给人看（也便于贴进 `.agents/implementations/`）。
     pub fn write_to(&self, dir: &std::path::Path) -> std::io::Result<(std::path::PathBuf, std::path::PathBuf)> {
         std::fs::create_dir_all(dir)?;
         let json_path = dir.join("spike-report.json");
@@ -219,7 +219,7 @@ impl SpikeReport {
         Ok((json_path, md_path))
     }
 
-    /// 人读的那份（也是往 `implementations/` 里贴的原始材料）。
+    /// 人读的那份（也是往 `.agents/implementations/` 里贴的原始材料）。
     pub fn to_markdown(&self) -> String {
         let mut out = String::new();
         out.push_str("# 渲染 spike 报告（自动生成）\n\n");

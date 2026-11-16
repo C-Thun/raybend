@@ -21,4 +21,4 @@
 - [x] 默认桌面构建的独立 AI worker、任务租约与 catalog commit 守卫、事件/XMP联动。
 - [x] Windows 完整应用固定 CPU 运行库/模型资源打包与 debug 制品核对，完整桌面 exe 的 worker 私有加载与两张真图编码冒烟通过；GUI/真实库/安装器仍待验收。
 
-本轮实施/验证/未测项：`implementations/2026-10-04_photo-organization-ai-tinyclip-delivery.md`；底座阶段证据保留在 `implementations/2026-10-04_photo-organization-ai-foundation-and-model-gate.md`。
+本轮实施/验证/未测项：`.agents/implementations/2026-10-04_photo-organization-ai-tinyclip-delivery.md`；底座阶段证据保留在 `.agents/implementations/2026-10-04_photo-organization-ai-foundation-and-model-gate.md`。

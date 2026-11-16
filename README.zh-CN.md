@@ -105,7 +105,7 @@ Rust · Tauri 2 · wgpu（原生 GPU 渲染）· SolidJS · Tailwind CSS · SQLi
 - 开发命令：[docs/development.md](docs/development.md)
 - 发布、签名与更新通道：[docs/release.md](docs/release.md)
 - 隐私：[docs/privacy.md](docs/privacy.md) · [English](docs/privacy.en.md)
-- 工程决策与记忆：[AGENTS.md](AGENTS.md)、[memory/](memory/)
+- 工程决策与记忆：[AGENTS.md](AGENTS.md)、[.agents/memory/](.agents/memory/)
 
 ## 许可
 

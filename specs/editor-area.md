@@ -2,11 +2,11 @@
 
 > **状态**：**W0–W6 已实施**（2026-10-31；历史交接 `specs/editor-area-handoff.md`，
 > **修 bug 阶段看 `specs/editor-area-bugfix-handoff.md`**）。
-> 实施记录：`implementations/2026-10-31_editor-area-w2-render.md` … `…-w6-closeout.md`。
+> 实施记录：`.agents/implementations/2026-10-31_editor-area-w2-render.md` … `…-w6-closeout.md`。
 > **开工门禁**：先出 `design/editor.pen` 四帧（W0，2026-10-31 崔总「没问题」），之后才动代码。
 > **粒度**：按 §5.4，W1 已细化落地；W2–W6 的实现口径在本文件里按「做完的事实」更新（见各节末尾的 2026-10-31 注）。
-> **关联**：`AGENTS.md` §2.27 / §2.28 / §11、`memory/LIMITS.md`、`memory/PLAN.md` §4、
-> `memory/FUTURE.md` §D4/D11–D13、`docs/native-viewport-coordinate-guide.md` §4、
+> **关联**：`AGENTS.md` §2.27 / §2.28 / §11、`.agents/memory/LIMITS.md`、`specs/PLAN.md` §4、
+> `.agents/memory/FUTURE.md` §D4/D11–D13、`docs/native-viewport-coordinate-guide.md` §4、
 > `specs/editor-lut-chain.md`、`specs/xmp-sidecar.md` §5.1、`specs/issue-xmp-contract.md`。
 
 ## 0. 一句话
@@ -70,7 +70,7 @@ pub struct Area {
     name: String,     // ≤30 字符；空 = 显示类型默认名
     enabled: bool,
     opacity: f32,     // 0..=1；近期无 UI
-    color: u8,        // **控制点色槽位 0..8**（`memory/DESIGN.md` §15.5），存下标不存色值
+    color: u8,        // **控制点色槽位 0..8**（`.agents/memory/DESIGN.md` §15.5），存下标不存色值
     params: BTreeMap<String, f64>,
     curves: BTreeMap<String, Vec<[f32; 2]>>,
 }
@@ -189,7 +189,7 @@ band(b, x) = 1                               x ≤ b.core
 * **数值域**：`u ∈ 100..=1000`（`f32` 存储，连续无台阶）；新建时 **300**。它同时是白线的长度。
 * **映射的八个数字**在 `crates/raybend/src/develop/areas.rs::POINT_WEIGHT_CONFIG`
   （`luma_core / luma_end / chroma_core / chroma_end`，每个都是 `[u=100, u=1000]` 两端、中间线性）。
-  改手感**只动这八个数字**（开发期走调试面板，见 `implementations/2026-11-01_control-point-tolerance-and-ux.md`），
+  改手感**只动这八个数字**（开发期走调试面板，见 `.agents/implementations/2026-11-01_control-point-tolerance-and-ux.md`），
   改完必须抬 `PIPELINE_VERSION`。
 * **感知域而非线性域**：线性 luma 在暗部挤在 0 附近，同一个容差在阴影里很宽、在高光里很窄 ——
   手感必然「一格一格」。sRGB 编码之后再量，容差在整条影调上近似等感
@@ -206,7 +206,7 @@ band(b, x) = 1                               x ≤ b.core
   ——载入 latest 时按每个点的 `x/y` 逐点重新取样一次（位置 / 容差 / 参数都不动），然后落库。
 * 原版多点"归一化竞争"（式 \[21\]）**不用于层间**，只留给将来"一个 area 里放多个控制点"。
 * **独立设计声明（FTO，崔总 2026-10-31 要求记录）**：本权重由「位置无关特征 + 容差衰减」自行设计，**不参考任何厂商二进制实现**（无反编译、无移植）。形态上最接近的 Nik / Google『User definable image reference points』族（US 6,728,421 B2 及其 continuation 链，权利要求 1 就写着「each set having at least one characteristic that is location independent」）**已于 2022-10-24 到期**，当前不构成障碍；仍在有效的 Adobe『Local color range selection』族（US 11,223,744 B2 / CN 109 671 024 B）要求**空间掩膜与范围掩膜两个独立掩膜组合加权**，而本节成立的正是「**零空间项 + 单权重**」，不落入该结构。
-* **专利边界同时是设计边界**：将来的蒙版**独立成层**（`AreaKind::Mask`），其权重图就是那一层的权重，与控制点**不相乘、不交叉** —— 不要为了「效果更准」把两个权重合成一个组合掩膜，那会同时破坏管线契约（§2.27）与上述边界。备忘：`implementations/2026-10-31_control-point-and-mask-patent-fto.md`。
+* **专利边界同时是设计边界**：将来的蒙版**独立成层**（`AreaKind::Mask`），其权重图就是那一层的权重，与控制点**不相乘、不交叉** —— 不要为了「效果更准」把两个权重合成一个组合掩膜，那会同时破坏管线契约（§2.27）与上述边界。备忘：`.agents/implementations/2026-10-31_control-point-and-mask-patent-fto.md`。
 
 ### 4.3 `默认` 层 = 全局功能的宿主
 
@@ -247,7 +247,7 @@ LUT 面板**恒可用**（崔总 2026-11-01）：选中控制点 / 全图层时�
 ### 4.8 封闭控制点：**本期不做**
 
 **决策**：只做**非封闭**（全图向量匹配，§4.2）。封闭控制点（区域生长、不跨过不相似的像素）
-**本期不做**，方案整体存档在 `memory/FUTURE.md` D14 —— 做的时候照那份走，不要另起一套。
+**本期不做**，方案整体存档在 `.agents/memory/FUTURE.md` D14 —— 做的时候照那份走，不要另起一套。
 
 一句话理由：封闭点要邻域遍历 + 全图权重图，**不是逐像素算子**，进层就破了 `AGENTS.md` §2.27
 （而那条红线正是"合成不需要中间图"的前提）。它的正确形态是**预计算掩膜层**（`AreaKind::Mask`），
@@ -306,7 +306,7 @@ LUT 面板**恒可用**（崔总 2026-11-01）：选中控制点 / 全图层时�
 | 掩膜权重 ≈ 0 的层直接 `continue` | 控制点几乎免费（画面大多数像素权重为 0） |
 | 纯影调层不进显示域（§4.5 的早退） | 省掉 6 次 OETF / 逆 OETF |
 | **相邻、掩膜恒为 1、只含线性项**的 `全图` 层 ⇒ 可预折叠成一条 1D 复合表（每通道一张，按 u16 精确索引） | 把"N 层 = N 倍"压回常数；代价是参数变化时重建一次表 |
-| 32 层上限（`memory/LIMITS.md`） | 兜底 |
+| 32 层上限（`.agents/memory/LIMITS.md`） | 兜底 |
 
 > 折叠只在"中间没有控制点、没有需要跨域的层"时成立；被控制点隔开就分段各折一次。W2 实现时判据写死。
 
@@ -370,7 +370,7 @@ LUT 面板**恒可用**（崔总 2026-11-01）：选中控制点 / 全图层时�
   设计稿只画了左 / 右两态，量标签宽度做动态翻边会让同一张照片在缩放时来回翻，反而抖。
   竖直方向只有一条**布局准则**：贴近洞顶（上方不足 26 CSS px）时名字翻到线下方（不量文字宽度）。
 * 形：**非封闭 = 圆片**（现在只有这一种）；将来加**封闭**时用**朝上的正三角形**（§4.8）。
-* 颜色来自**固定八色板**（`memory/DESIGN.md` §15.5，存的是槽位下标）；创建时取"已用得最少"的那个，
+* 颜色来自**固定八色板**（`.agents/memory/DESIGN.md` §15.5，存的是槽位下标）；创建时取"已用得最少"的那个，
   并列取下标最小。与 browse 的图片色标刻意分家（那五个是中调灰、这八个是高饱和）。
 * 圆片 / 文字 / handle 尺寸是**屏幕像素固定**；位置随图像变换。
 * 点本身**不参与选中模型**，但**拖动它即把该 area 设为当前编辑层**（否则拖完位置右栏还在改别的层）。
@@ -477,7 +477,7 @@ editor 的设计系统、令牌、外壳几何都在这一份里，另开一个�
 | W6 | 收尾：i18n、快捷键、四份文档、实施记录 | 全部 | 小 | ✅ 2026-10-31 |
 
 W2 与 W3/W4 可并行（文件不重叠）。**2026-10-31：六个波次全部落地**，验收清单见
-`implementations/2026-10-31_editor-area-w6-closeout.md`（含质量门命令原文与结果）。
+`.agents/implementations/2026-10-31_editor-area-w6-closeout.md`（含质量门命令原文与结果）。
 
 ## 8. W1 细化（第一个可开工单元）
 
@@ -515,7 +515,7 @@ W2 与 W3/W4 可并行（文件不重叠）。**2026-10-31：六个波次全部�
 | 预设 | `store/presets.rs`、`src/lib/presets.ts`（按层类型过滤：非 `默认` 层不捕获 Global 项） | W5 |
 | 自动调整 | `AutoAdjustBaseline` 只作用于 `默认` 层 | W5 |
 | 缓存 | `DevelopStack::signature()` → 退化成 `[默认(空)]` 时逐字照旧 | W2 |
-| 文档 | `AGENTS.md` §11/§13、`memory/LIMITS.md`、`memory/FUNCTION-IMAGING.md`、`docs/native-viewport-coordinate-guide.md` §4 | W6 |
+| 文档 | `AGENTS.md` §11/§13、`.agents/memory/LIMITS.md`、`.agents/memory/FUNCTION-IMAGING.md`、`docs/native-viewport-coordinate-guide.md` §4 | W6 |
 
 ## 10. 决策账本（崔总 2026-10-31）
 
@@ -526,10 +526,10 @@ W2 与 W3/W4 可并行（文件不重叠）。**2026-10-31：六个波次全部�
 | D3 | 层不透明度 | 数据保留 `opacity`（默认 1）但**无 UI**；近期不做透明度。代价：重叠叠加过头没有总闸，只能调范围与参数 |
 | D4 | 种子语义 | **创建时冻结「该层输入」的合成结果** + 「重新取样」 |
 | D5 | 首版类型 | **`默认` / `全图` / `控制点`** 三种；蒙版是后续变体 |
-| D6 | 层数上限 | **32**（不含 `默认`）。见 `memory/LIMITS.md` |
+| D6 | 层数上限 | **32**（不含 `默认`）。见 `.agents/memory/LIMITS.md` |
 | D7 | 眼睛的语义 | **只管控制点的圆点 / 引线 / 名字**；蒙版可视化是另一套（半透明红区） |
 | D8 | 全局功能归属 | 全部挂在 **`默认`** 层：LUT / 局部色调 / 清晰度 / 镜头 / 色彩管理 / 基础曲线。非 `默认` 层灰掉（§5.8） |
-| D9 | 层的复制 / 粘贴 | **不做**，`memory/FUTURE.md` D12（「有人给我钱了再做」） |
+| D9 | 层的复制 / 粘贴 | **不做**，`.agents/memory/FUTURE.md` D12（「有人给我钱了再做」） |
 | D10 | 范围控制方式 | **画布上引线末端的 handle**；层行不放滑杆 |
 | D11 | 引线翻边 | 按**可用空间** + 死区 |
 | D12 | 控制点的"显示影响面" | **不做** |
@@ -539,7 +539,7 @@ W2 与 W3/W4 可并行（文件不重叠）。**2026-10-31：六个波次全部�
 | D16 | 精度契约 | **层间 f32 线性、不落地、不夹取**；量化只在入 / 出各一次（§4.6） |
 | D17 | `默认` 是否可移动 | **可移动** —— 这是"LUT 之前 / 之后"唯一的手段（§4.3） |
 | D18 | 顺序术语 | 位置说「第 N 层 / 基底」，先后说「先 / 后」；禁止「上 / 下」（`AGENTS.md` §11.5） |
-| D19 | 控制点颜色 | **固定八色、按「已用得最少」自动分配**（并列取下标最小），版本内不做改色；层里存槽位下标（`memory/DESIGN.md` §15.5） |
+| D19 | 控制点颜色 | **固定八色、按「已用得最少」自动分配**（并列取下标最小），版本内不做改色；层里存槽位下标（`.agents/memory/DESIGN.md` §15.5） |
 | D20 | 控制点的本质 | **全图向量匹配，不是蒙版、不是圆形蒙版、没有空间项**；`x/y` 只用于取种子与画标记（§4.2） |
 | D21 | handle 的语义 | 控**向量容差**（含强度渐变宽度），**不画范围圆**（画圈等于宣称空间边界） |
 | D22 | 封闭控制点 | **本期不做**；以后按"蒙版层"实现（预计算权重图），不是 `Point` 的开关（§4.8） |
@@ -562,4 +562,4 @@ W2 与 W3/W4 可并行（文件不重叠）。**2026-10-31：六个波次全部�
 ## 12. 明确不做
 
 蒙版 / 智能蒙版 / 画笔、**封闭控制点**、层的不透明度 UI、控制点影响面可视化、每层直方图、层 solo/独显、
-层的复制粘贴（D9）、三路色彩圆盘（`memory/FUTURE.md` D11）。
+层的复制粘贴（D9）、三路色彩圆盘（`.agents/memory/FUTURE.md` D11）。

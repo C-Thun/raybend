@@ -17,7 +17,7 @@
 //! 2. **`begin_run` 立刻提交**（不攒）—— 不然崩溃之后根本不知道上次在导什么。
 //!
 //! 资产登记**不走 `apply_diff`**：它的配对键是「同目录 + 同名主体」，而
-//! `memory/FUNCTION-REPOSITORY.md` §4.1 的 `_RAW/` 约定下 RAW 与位图天生不同目录 ——
+//! `.agents/memory/FUNCTION-REPOSITORY.md` §4.1 的 `_RAW/` 约定下 RAW 与位图天生不同目录 ——
 //! 直接用它会把一张照片拆成两条资产（网格里两个格子）。这里改成
 //! 「把 `_RAW/` 折算回位图那个目录再找资产」，其余（新建资产、插文件行）用的还是
 //! `store::assets` 里那几个函数。
@@ -829,7 +829,7 @@ fn unique_violation(error: &crate::Error) -> bool {
     )
 }
 
-/// 库里记着「哪些源已经导进来过」（`memory/FUNCTION-REPOSITORY.md` §4.3）。
+/// 库里记着「哪些源已经导进来过」（`.agents/memory/FUNCTION-REPOSITORY.md` §4.3）。
 fn load_known_sources(conn: &rusqlite::Connection) -> Result<KnownSources> {
     load_known_sources_filtered(conn, false)
 }

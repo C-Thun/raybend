@@ -1,7 +1,7 @@
 # 导出文件名：issue 序号体系（IXX / ISO / IRA / ILA）
 
 > 工作单元：#24 ｜ 状态：**代码完成，收口项待环境**（check:export 整跑 + 真机 E2E）｜ 需求原文已按约定移除（todos/ 做完即删）
-> 关联记忆：`memory/FUNCTION-IMAGING.md`（issue 语义）、`memory/FUNCTION-REPOSITORY.md`（命名模版）
+> 关联记忆：`.agents/memory/FUNCTION-IMAGING.md`（issue 语义）、`.agents/memory/FUNCTION-REPOSITORY.md`（命名模版）
 
 ## 1. 背景与要修的 bug
 

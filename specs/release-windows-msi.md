@@ -1,6 +1,6 @@
 # WSL 一条命令生成 Windows 安装器
 
-2026-09-29。承接 `memory/FUTURE.md` G22 与 2026-09-27 WiX 路径排障记录。
+2026-09-29。承接 `.agents/memory/FUTURE.md` G22 与 2026-09-27 WiX 路径排障记录。
 
 ## 范围与方案
 

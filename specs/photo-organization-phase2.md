@@ -13,7 +13,7 @@
 - CPU 完整运行是交付基线，**产品不得依赖 CUDA、Python、PyTorch 或外部 AI 服务**。模型制作工具与终端产品运行依赖分开。
 - 明确范围、主动启动；本期不做导入后静默自动识别、不后台扫描全部历史库。
 - 不做：人脸身份/聚类、自然语言搜索/向量库、检测框、自动描述/OCR、编辑蒙版、自动修图、训练/微调、自定义任意识别词。
-- 蒙版独立登记 `memory/FUTURE.md` D4/E2。标签“屏蔽”与图像“蒙版”是不同数据，不能混用。
+- 蒙版独立登记 `.agents/memory/FUTURE.md` D4/E2。标签“屏蔽”与图像“蒙版”是不同数据，不能混用。
 
 允许为了效能限制并发和缩减自动化。本期保留七类，逐类披露实际效果：人物漏标、海类误标/漏标仍明显，不将校准目标等同真实图库保证，不删除难类后宣称原范围全部达标。
 
@@ -41,7 +41,7 @@
 | 顺序 | 候选 | 用途与决定 |
 | --- | --- | --- |
 | 本期采用 | `wkcn/TinyCLIP-ViT-40M-32-Text-19M-LAION400M` | 固定revision，FP32图像编码器151.53 MiB；按崔总认可的准确率偏好完成校准与交付 |
-| 远期考查 | `google/siglip2-base-patch16-224` | 本期不安装、不并跑；成本与原实验保留在 `memory/FUTURE.md` E1 |
+| 远期考查 | `google/siglip2-base-patch16-224` | 本期不安装、不并跑；成本与原实验保留在 `.agents/memory/FUTURE.md` E1 |
 
 原规划生产端只装**一个默认标签模型**，首版不做模型市场/多个识别模型并跑。不根据 ImageNet 总分或论文 GPU 吞吐直接选型。
 
@@ -83,7 +83,7 @@
 
 ## 4. 图像输入：原始内容与显示缩略图区分
 
-已确认 `memory/FUNCTION-IMAGING.md` 定义小图随最新编辑变化。**不能直接读取“当前网格封面”来做内容识别。**
+已确认 `.agents/memory/FUNCTION-IMAGING.md` 定义小图随最新编辑变化。**不能直接读取“当前网格封面”来做内容识别。**
 
 选择顺序：资产原始 SOOC/位图 → RAW 内嵌预览。RAW-only 无可用内嵌预览时，首期记录“缺少识别预览”并跳过，**不为了 AI 批量触发全尺寸 RAW 显影**。原始资源损坏/缺失不能当作成功空标签。
 
@@ -213,6 +213,6 @@ XMP 接缝尚未稳定不阻塞 W1 与独立算法/数据工作；但**未完成
 默认单测使用固定分数、小 ONNX fixture/假 backend 和小规模 SQLite 数据；真实模型/吞吐实验独立运行，不拖慢 `cargo test` / `pnpm test`。
 Agent 做编译、单测、日志、CLI/进程与可重复脚本冒烟；Windows 真实照片效果、GUI/DPI 与性能体感由崔总验收。本轮实际单测、编译、CLI与进程结果见实施记录；配置有效模型源的 Windows 产品构建接入 CPU 推理，安装固定模型后可使用；未配置或输入不可用时构建基础版；开发冒烟不等同 GUI/真实图库验收或正式发行。
 
-本轮实施/验证/未测项：`implementations/2026-10-04_photo-organization-ai-tinyclip-delivery.md`；原门槛实验与底座阶段记录保留在 `implementations/2026-10-04_photo-organization-ai-foundation-and-model-gate.md`。
+本轮实施/验证/未测项：`.agents/implementations/2026-10-04_photo-organization-ai-tinyclip-delivery.md`；原门槛实验与底座阶段记录保留在 `.agents/implementations/2026-10-04_photo-organization-ai-foundation-and-model-gate.md`。
 
 2026-10-04 构建方案续修：模型已迁入独立 model-registry，本地登记被 Git 忽略。普通构建不导出 ONNX；auto/required/off 三模式统一前端、Rust 和资源。无 AI 状态设计已获确认，旧 AI 标签与 XMP 互操作保持。见 specs/ai-model-library-build.md。

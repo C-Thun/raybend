@@ -41,7 +41,7 @@ test("空串/纯空白不算一条输入", () => {
   assert.deepEqual([...pushRecentValue(["杭州"], "   ")], ["杭州"]);
 });
 
-test("每个字段最多保留 TEXT_SUGGEST_LIMIT 条（上限登记在 memory/LIMITS.md）", () => {
+test("每个字段最多保留 TEXT_SUGGEST_LIMIT 条（上限登记在 .agents/memory/LIMITS.md）", () => {
   let recent: readonly string[] = [];
   for (let index = 0; index < TEXT_SUGGEST_LIMIT + 8; index += 1) {
     recent = pushRecentValue(recent, `地点 ${index}`);

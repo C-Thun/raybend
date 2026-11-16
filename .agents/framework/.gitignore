@@ -1,0 +1,6 @@
+# Runtime state, not memory.
+# Snapshots are copies of what a migration touched; plans and reports are the
+# transient output of one run. None of it belongs in version control.
+snapshots/
+plans/
+reports/

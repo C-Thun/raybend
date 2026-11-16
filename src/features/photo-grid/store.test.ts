@@ -723,7 +723,7 @@ test("按时间补读分块（48/条），关掉之后不再读后续块", async
    * 为什么是「小批」而不是「一趟读完」（2026-10-11 崔总拍板的改法）：
    * 以前 `TIMES_BATCH = 512`——一条命令读整目录，真机 306 张要 6 秒，
    * 那 6 秒里所有缩略图请求和整个界面都被按住（诊断
-   * `implementations/2026-10-11_import-still-slow-diagnosis.md`）。
+   * `.agents/implementations/2026-10-11_import-still-slow-diagnosis.md`）。
    * 现在一条命令最多 48 张（几十毫秒），块间让出一帧，界面插得进空。
    */
   const f = fakeApi({ items: Array.from({ length: 200 }, (_, i) => item(`${i}.JPG`)) });

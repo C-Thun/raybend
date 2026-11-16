@@ -14,4 +14,4 @@
 
 追加授权：崔总要求最终交付每版不超过三条指令；现收敛为本地准备与显式发布两条，工具/账号/Pages 一次性配置另列，实际执行仍由崔总完成。Pencil 节点核查通过，独立副本未被 MCP 打开（落回当前画布）；computer-use 因 WSL sandboxCwd URI 无法初始化，磁盘独立重载未确认。
 
-收口证据：`implementations/2026-09-27_m5-two-command-release.md`。45 项发布模拟回归、1059 项应用单测、95 项桌面 Rust/1 ignored、24 项官网单测与相关质量门通过。实际 Windows bundle/签名/安装/更新/GitHub/Pages 未执行；M5 发行 DoD 未完成。
+收口证据：`.agents/implementations/2026-09-27_m5-two-command-release.md`。45 项发布模拟回归、1059 项应用单测、95 项桌面 Rust/1 ignored、24 项官网单测与相关质量门通过。实际 Windows bundle/签名/安装/更新/GitHub/Pages 未执行；M5 发行 DoD 未完成。

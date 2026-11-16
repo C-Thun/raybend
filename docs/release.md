@@ -306,7 +306,7 @@ Windows cargo 构建主程序与 worker → 打所选安装器 → 核对嵌入�
 | --- | --- |
 | `pnpm tauri dev` 报找不到 webkit2gtk / pkg-config | 按 §1.1 装齐图形库；改动系统库后重开终端 |
 | Rust 版本不对 / 提示 toolchain 缺失 | 交给 `rustup`：`rust-toolchain.toml` 会拉 1.98.1；不要 `rustup default` 改全局 |
-| 依赖变更（升级 tauri / wgpu 等） | 改完跑 `pnpm install` + `cargo check --workspace` + `pnpm test:release`；版本基线变动要同步 `memory/ARCHITECTURE.md` |
+| 依赖变更（升级 tauri / wgpu 等） | 改完跑 `pnpm install` + `cargo check --workspace` + `pnpm test:release`；版本基线变动要同步 `.agents/memory/ARCHITECTURE.md` |
 | WSL 升级 / 换发行版 | 重跑 `corepack enable` 与 §1.1 的 apt 清单；Windows 侧不受影响 |
 | AVIF 相关报错（WSL） | 确认 `libdav1d-dev` 在：`dpkg -l libdav1d-dev`；WSL 侧**不该**出现 `SYSTEM_DEPS_DAV1D_*` 的用法 |
 
@@ -354,7 +354,7 @@ Windows cargo 构建主程序与 worker → 打所选安装器 → 核对嵌入�
 | 症状 | 根因 | 做法 / 落点 |
 | --- | --- | --- |
 | `cargo metadata --locked` 拒绝写锁：`cannot update the lock file … --locked` | 发版只同步了两个包在 `Cargo.lock` 里的版本，**新增的 workspace 成员漏了**（首次是 `raybend-crashpad`） | `versionEdits` 改为按 `[workspace] members` 动态解析（`d3a03ac`）；新增成员自动跟上 |
-| 「创建后未找到 Release，请重跑同一指令」（草稿明明建成了） | ① `GET /releases/tags/<tag>` **对 draft 固定 404**；② 列表端点对**刚创建的草稿**有秒级索引延迟 | ① 改用列表端点匹配 `tag_name`（`940eaa4`），带断言防回归；② `create` 之后用 `wait` 轮询 10 次（约 18s）再判失败（2026-10-31 v0.1.4 第二次踩到，同日记 `implementations/`）|
+| 「创建后未找到 Release，请重跑同一指令」（草稿明明建成了） | ① `GET /releases/tags/<tag>` **对 draft 固定 404**；② 列表端点对**刚创建的草稿**有秒级索引延迟 | ① 改用列表端点匹配 `tag_name`（`940eaa4`），带断言防回归；② `create` 之后用 `wait` 轮询 10 次（约 18s）再判失败（2026-10-31 v0.1.4 第二次踩到，同日记 `.agents/implementations/`）|
 | 已装版本检查更新报「更新失败：Could not fetch a valid release JSON from the remote」 | 最新那版**没带 `--with-updater`**：它没有 `latest.json`，而 `releases/latest/download/latest.json` 永远指向**最新** Release → 404，链整条断掉（2026-10-31：v0.1.4 就是这么发的，0.1.3 用户全部卡住） | 发一版带 `--with-updater` 的修复（更新会直接跳过去）；`pnpm release` 已加断链防护：仓里有更新公钥的正式版必须带 `--with-updater`，确实不带要显式 `--no-updater`（2026-10-31） |
 | `cargo publish` 上传超时：`[28] Timeout was reached (Connection timed out after 30001 ms)` | 默认 30 s 上传超时，直连 crates.io 偶发 | 发布时固化 `CARGO_HTTP_TIMEOUT=600` / `CARGO_NET_RETRY=5`（`940eaa4`），已有环境变量不覆盖 |
 | 官网部署失败：`Tag "v0.1.2" is not allowed to deploy to github-pages due to environment protection rules` | `github-pages` environment 只允许 `master` 分支，而 release 事件的 ref 是 tag | 加 tag 规则 `v*`（§3.1）；文档与流程都已写死这条前置 |
@@ -527,7 +527,7 @@ Microsoft Store 当前新入口个人/公司注册免费，仍需身份验证：
 
 ### 6. MSIX 商店路线（本轮后移）
 
-崔总 2026-09-27 明确：登记 FUTURE 后续独立启动，本轮先完成直下发行链。正式落点为 memory/FUTURE.md 的 Windows MSIX 分发条目；没有把它列成本轮发布的前置。同日下午拍板（memory/REVIEW.md R3-01）：**官网直下走通后即启动 MSIX**，定位是「零现金成本解决 Windows 安装体验」的主攻方向——它与直下是并行的两条分发通道，不是证书的替代品；发布顺序见 memory/REVIEW.md §8。
+崔总 2026-09-27 明确：登记 FUTURE 后续独立启动，本轮先完成直下发行链。正式落点为 .agents/memory/FUTURE.md 的 Windows MSIX 分发条目；没有把它列成本轮发布的前置。同日下午拍板（.agents/memory/REVIEW.md R3-01）：**官网直下走通后即启动 MSIX**，定位是「零现金成本解决 Windows 安装体验」的主攻方向——它与直下是并行的两条分发通道，不是证书的替代品；发布顺序见 .agents/memory/REVIEW.md §8。
 
 仍需您开户、预留产品名并取得 Partner Center 的 Package Identity Name/Publisher；目前没有这些实际身份，不能提交有效 MSIX。Tauri 官方当前教程覆盖 EXE/MSI，MSIX 需要另用 Windows SDK MakeAppx/打包工具包装，不能复用 NSIS 直接上传冒充 MSIX。
 
@@ -605,7 +605,7 @@ cargo publish -p raybend             # 上传（崔总执行）
 ## 附录 D · AI 外挂编译（`--ai`）
 
 AI 能力是**编译期外挂**：模型与 CPU 推理库不进本仓 Git，构建时按校验过的字节装进安装包。
-功能规格见 `specs/ai-model-library-build.md` 与 `memory/FUNCTION-IMAGING.md`；这里只讲发布侧怎么用。
+功能规格见 `specs/ai-model-library-build.md` 与 `.agents/memory/FUNCTION-IMAGING.md`；这里只讲发布侧怎么用。
 
 ### 输入从哪来
 
@@ -744,7 +744,7 @@ pnpm release patch --win-msi --unsigned
 
 GitHub 草稿/资产与 `--verify-tag` 参数依据：https://cli.github.com/manual/gh_release_create 。
 Release 触发 Pages 与令牌触发边界依据：https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#release 、https://docs.github.com/en/actions/how-tos/writing-workflows/choosing-when-your-workflow-runs/triggering-a-workflow 。
-v0.1.2 的实跑记录：`implementations/2026-10-15_first-release-and-fixes.md`。
+v0.1.2 的实跑记录：`.agents/implementations/2026-10-15_first-release-and-fixes.md`。
 
 ---
 
@@ -792,7 +792,7 @@ v0.1.2 的实跑记录：`implementations/2026-10-15_first-release-and-fixes.md`
 
 ## 附录 I · 为什么不排期 CI 打包
 
-**结论：技术上可行，但对现状不划算，不排期**（崔总 2026-10-24：发版前、发版、发版后都不做）。只作为方向存档在 `memory/FUTURE.md` G24；除非崔总重新提出，否则不再评估。
+**结论：技术上可行，但对现状不划算，不排期**（崔总 2026-10-24：发版前、发版、发版后都不做）。只作为方向存档在 `.agents/memory/FUTURE.md` G24；除非崔总重新提出，否则不再评估。
 
 评估依据（已核对的代码与事实）：
 
@@ -841,7 +841,7 @@ pnpm clean:report
 （`[profile.dev.package."*"] debug = false`；自己的 crate 仍保留 `[profile.dev] debug = 1` 的行号表）。
 量级参考：单个 example 二进制 211 MB，`strip --strip-debug` 后只剩 **22 MB**（2026-10-26 实测）——
 即调试题信息占九成；只剥依赖估在 40–70 MB/个。代价：进不了第三方库的源码行
-（backtrace 仍有函数名），且两个 target 都要重编一次。详见 `memory/ARCHITECTURE.md` §8 第 10 条。
+（backtrace 仍有函数名），且两个 target 都要重编一次。详见 `.agents/memory/ARCHITECTURE.md` §8 第 10 条。
 
 ---
 

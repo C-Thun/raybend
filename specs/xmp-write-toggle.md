@@ -1,7 +1,7 @@
 # XMP 写出开关（验收增补单元）
 
 **状态**：已批准实施（崔总 2026-10-09 问答拍板），本轮完成。
-**关联**：`specs/xmp-sidecar.md`（主体规格；本文件修订其 §9「无设置开关」与 §11.6）、`specs/xmp-audit-tool.md`（验收工具）、`memory/REVIEW.md` R6-06。
+**关联**：`specs/xmp-sidecar.md`（主体规格；本文件修订其 §9「无设置开关」与 §11.6）、`specs/xmp-audit-tool.md`（验收工具）、`.agents/memory/REVIEW.md` R6-06。
 
 ---
 

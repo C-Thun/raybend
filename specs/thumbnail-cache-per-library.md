@@ -1,7 +1,7 @@
 # 小图缓存按库（384 / AVIF q80 / 每库 2 GiB）
 
 > 2026-10-25 崔总拍板。取代「全局 `_sources/thumbs.db`」的旧布局。
-> 唯一事实源仍是 `memory/FUNCTION-IMAGING.md`（格式与档位）与 `AGENTS.md` §6.5（缓存红线）；
+> 唯一事实源仍是 `.agents/memory/FUNCTION-IMAGING.md`（格式与档位）与 `AGENTS.md` §6.5（缓存红线）；
 > 本规格记录**本次改动**的位置、容量、回收、迁移与验收。
 
 ## 0. 目标与基础保障指标
@@ -84,7 +84,7 @@
 
 ## 6. 不做 / 后续
 
-- **不**把 384 改成磁盘文件（一图一文件）：见 `memory/FUTURE.md` G27（仅存档）。
+- **不**把 384 改成磁盘文件（一图一文件）：见 `.agents/memory/FUTURE.md` G27（仅存档）。
   代价是 15 万 inode、GC 扫目录、丢 hits、Windows Defender 扫小文件。
 - **不**删/合并已用标签（跨库清 `asset_tags`）；只清 `use_count = 0` 的未使用标签。
 - XMP：小图是派生数据，不影响 sidecar；标签上限不改 XMP 映射。

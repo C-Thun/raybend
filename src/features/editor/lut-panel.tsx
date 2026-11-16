@@ -1,5 +1,5 @@
 /**
- * 编辑左栏：**LUT 面板**（`design/editor.md` §3.1、`prompts/editor.pd`）。
+ * 编辑左栏：**LUT 面板**（`design/editor.md` §3.1、`.agents/prompts/editor.pd`）。
  *
  * ```text
  * LUT                          [+分类] [导入]
@@ -240,7 +240,7 @@ export function LutPanel(props: LutPanelProps): JSX.Element {
       <div class="flex shrink-0 items-center justify-between px-panel-pad pb-1 text-fs-1 text-fg-2">
         <span>{t("editor.lut.apply")}</span>
         {/*
-          开关一律用全系统同一份 `Switch`（`memory/DESIGN.md` 的控件分工）。
+          开关一律用全系统同一份 `Switch`（`.agents/memory/DESIGN.md` 的控件分工）。
           这里曾经是一颗原生 `<input type="checkbox">`（崔总多次指出）—— 原生控件
           不吃主题令牌，深浅色下都足一截，而且键盘/读屏行为跟别处不一致。
         */}

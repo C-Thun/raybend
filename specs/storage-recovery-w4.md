@@ -17,5 +17,5 @@
 - [x] 库设置、卡片、双语提示与命令接入符合批准画稿。
 - [x] Rust/前端单测、质量门与合成冒烟通过，最终 Windows 产物核对通过。
 
-勾选表示开发、单元与合成冒烟，证据见 `implementations/2026-09-29_storage-recovery-w4.md`。
+勾选表示开发、单元与合成冒烟，证据见 `.agents/implementations/2026-09-29_storage-recovery-w4.md`。
 Windows 句柄真实退场、拔插、照片与视觉仍由崔总统一四波验收；释放不等于 OS 弹出设备。

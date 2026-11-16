@@ -105,7 +105,7 @@ Rust · Tauri 2 · wgpu (native GPU rendering) · SolidJS · Tailwind CSS · SQL
 - Development commands: [docs/development.md](docs/development.md) (Chinese)
 - Release, signing and update channels: [docs/release.md](docs/release.md) (Chinese)
 - Privacy: [docs/privacy.md](docs/privacy.md) · [English](docs/privacy.en.md)
-- Engineering decisions and memory: [AGENTS.md](AGENTS.md), [memory/](memory/) (Chinese)
+- Engineering decisions and memory: [AGENTS.md](AGENTS.md), [.agents/memory/](.agents/memory/) (Chinese)
 
 ## License
 

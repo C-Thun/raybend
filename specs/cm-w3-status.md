@@ -10,4 +10,4 @@ Pencil 先更新 main 的深浅两稿及 editor 色彩面板，同名说明同�
 
 验收依据：Rust/TS DTO 契约与状态单元测试、前端质量门、UI 冒烟、Windows 主程序/worker 产物核对。真实颜色、多屏/DPI/ACM 和整窗体感由崔总统一验收，复杂 CLUT 软打样仍属后续范围。
 
-2026-10-04 交付：以上实现、DTO/状态单测、中英组件与 UI 冒烟、Windows 配套构建均已通过；统一实机验收路径见 `../implementations/2026-10-04_color-management-ready-for-acceptance.md`。
+2026-10-04 交付：以上实现、DTO/状态单测、中英组件与 UI 冒烟、Windows 配套构建均已通过；统一实机验收路径见 `../.agents/implementations/2026-10-04_color-management-ready-for-acceptance.md`。

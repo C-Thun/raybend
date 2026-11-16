@@ -1,5 +1,5 @@
 /**
- * SectionTitle —— 面板里的**段标题**（`memory/DESIGN.md` §10.1）。
+ * SectionTitle —— 面板里的**段标题**（`.agents/memory/DESIGN.md` §10.1）。
  *
  * 形态（崔总 2026-11-05 定）＝ 左侧一道 3px **主色**竖条 + 加粗标题字。
  *

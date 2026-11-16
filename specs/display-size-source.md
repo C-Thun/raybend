@@ -8,7 +8,7 @@
 `src-tauri/src/browse.rs`（`AssetItem`）；`src-tauri/src/export.rs`（`VariantSnapshot` / `export_variant_details`）；
 `src-tauri/src/issues.rs`（`IssueDto` / `preview_bytes`）；`src/components/ui/viewer/{store.ts,Viewer.tsx}`；
 `src/features/browse/display-variants.ts`；`src/features/browse/grid-source.ts`；`src/features/exif-strip/selected.ts`；
-`memory/FUNCTION-IMAGING.md` §3/§4；`memory/FUNCTION-BROWSE.md` §5.9/§5.10。
+`.agents/memory/FUNCTION-IMAGING.md` §3/§4；`.agents/memory/FUNCTION-BROWSE.md` §5.9/§5.10。
 
 ---
 
@@ -46,8 +46,8 @@
 - [x] `pnpm smoke:ui` 通过（`problems: []`）
 - [ ] **Windows 真机冒烟（人类）**：RAW+JPG（尺寸不同 + 竖拍）一张，切 SOOC / RAW / 各定稿，
       看图与 flow info 的尺寸逐项确认
-- [x] 纪律同步：`memory/FUNCTION-IMAGING.md`（尺寸口径）、`memory/FUNCTION-BROWSE.md`（flowinfo）、
-      `implementations/YYYY-MM-DD_display-size-source.md`（含迁移/回填实测与真机结论）
+- [x] 纪律同步：`.agents/memory/FUNCTION-IMAGING.md`（尺寸口径）、`.agents/memory/FUNCTION-BROWSE.md`（flowinfo）、
+      `.agents/implementations/2026-10-11_display-size-source.md`（含迁移/回填实测与真机结论）
 
 ---
 
@@ -206,7 +206,7 @@ issue 才是另一类实体（不可变、多条、`profile_json` 内联）。�
 
 **如果将来真要「彻底归到照片主体」**：那等价于把 `develop_stacks` / `develop_params` / `develop_curves`
 三张表合并进 `assets`（读写路径 / XMP / 撤销 / 缓存命名全动）——那是另一个量级的重构，本单元不做，
-登记到 `memory/FUTURE.md` 更合适（可选，不阻塞本单元）。
+登记到 `.agents/memory/FUTURE.md` 更合适（可选，不阻塞本单元）。
 
 ### 3.5 影响面与兼容边界（为什么不会「改一处炸三处」）
 
@@ -357,7 +357,7 @@ export function displaySizeOf(asset: AssetItem, choice: string | undefined, issu
    不读文件、不生成派生图、没有"升级中"的长任务，因此前端 `MigrationGate` 遮罩只需覆盖毫秒级 SQL
    （现有实现即够，不新增遮罩语义、不做进度条）。
 3. **补尺寸是派生数据、可重入、可中断**：NULL = 未知；回填失败**不**升级失败；绝不把"补尺寸"变成升级阻塞项
-   （对照 `todos/2026-09-29-catalog-preset-image-upgrade.md` 里"必需预置图"那类情形，本次不属于）。
+   （对照 `specs/database-upgrade-gate.md` 里"必需预置图"那类情形，本次不属于）。
 4. **只向前迁移，没有 down**：回退 = 用 `backups/catalog_<库ID>_*.db` 快照恢复（实施记录里复述恢复步骤）。
 5. **新列可空**：即便旧程序绕过闸门也读得懂（不加 NOT NULL / CHECK 强约束）。
 6. **不写回照片、不动 XMP**（§2.19）：本次改动不产生任何进 sidecar 的数据 —— 实施记录里写明
@@ -444,10 +444,10 @@ export function displaySizeOf(asset: AssetItem, choice: string | undefined, issu
 
 ## 11. 纪律同步（做完必须改）
 
-- `memory/FUNCTION-IMAGING.md` §3/§4：补「显示尺寸口径」一段（多版本尺寸、`display_size`、与三档图规格的关系）；
-- `memory/FUNCTION-BROWSE.md` §5.9/§5.10（右栏 / flow info）与术语表：尺寸随显示变体；view 按该尺寸布局；
-- `memory/ARCHITECTURE.md` §6.4：catalog 表结构描述补新列（如那里有清单）；
-- `implementations/YYYY-MM-DD_display-size-source.md`：迁移实测（v18→v19、快照路径）、回填实测、
+- `.agents/memory/FUNCTION-IMAGING.md` §3/§4：补「显示尺寸口径」一段（多版本尺寸、`display_size`、与三档图规格的关系）；
+- `.agents/memory/FUNCTION-BROWSE.md` §5.9/§5.10（右栏 / flow info）与术语表：尺寸随显示变体；view 按该尺寸布局；
+- `.agents/memory/ARCHITECTURE.md` §6.4：catalog 表结构描述补新列（如那里有清单）；
+- `.agents/implementations/2026-10-11_display-size-source.md`：迁移实测（v18→v19、快照路径）、回填实测、
   真机结论、XMP 侧影响：无、命令体系：不接入及理由。
 
 ---

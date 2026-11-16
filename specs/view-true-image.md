@@ -183,7 +183,7 @@
 真身渲染出来也是 `5184×3888` —— **数字与出图严格一致** ✓。
 
 **域外像素是另一回事**（画质，不是尺寸）：那圈 80×16 的边距像素对镜头校正的挪移有用，
-登记在 `memory/FUTURE.md`（改法：镜头校正早于裁切）。做那件事时输出尺寸仍应保持 5184×3888。
+登记在 `.agents/memory/FUTURE.md`（改法：镜头校正早于裁切）。做那件事时输出尺寸仍应保持 5184×3888。
 
 ## 2. 实施清单
 
@@ -225,7 +225,7 @@
 - [x] 换图（胶片带、进编辑器）都先给过渡帧 + 提示，再出真帧。
 - [x] 100% 必须是全尺寸（`render/tier.rs` 的规则保留；修掉「双击到 100% 仍是预览」那条路）。
 - [x] 登记（不在本单元做）：崔总 2026-10-11 提的「拖动时只渲染画面里实际可见的那块区域」→
-      `memory/FUTURE.md`。
+      `.agents/memory/FUTURE.md`。
 
 ---
 
@@ -242,7 +242,7 @@
 - [x] `sooc` 的真身 = **原文件字节**（位图 + 没编辑的短路；单测钉住「一个字节不改」）。
 - [x] 时间轴（WSL release 实测）：真身冷缓存 8.0s（这条是 20MP RAW + 完整解码 + 8.3MB JPEG 编码；
       其中解码 1.2s、编码 0.8s、develop 余下 —— **超 3s 预算**，Windows 真机要复测，
-      见 §0.4 的分解与 `memory/FUTURE.md` 的镜头校正条目）；命中缓存 **1ms**；写缓存 0.9s。
+      见 §0.4 的分解与 `.agents/memory/FUTURE.md` 的镜头校正条目）；命中缓存 **1ms**；写缓存 0.9s。
 - [x] editor：过渡帧不算载入结束（`editorViewportNotice` 改判定 + 单测）；
       「提示消失 ⇔ 真帧上屏」。
 - [x] 单测：`SizeClass::Full` / `ImagePurpose::Full` / 缓存分档与容量清扫 / 尺寸只认自己那一份 /
@@ -254,7 +254,7 @@
       Windows 有 GPU/更快的盘，需要真数）。
 - [x] RAW 尺寸 = **出图尺寸**（`RawlerBackend::output_size` 照抄 rawler `CropDefault`）；
       `raw_output_size` / `apply_display_size_source` 是唯一口径，导入/懒回填/批量回填三处都走它。
-- [x] 域外像素给镜头校正的改进项已登记 `memory/FUTURE.md`（画质，不是尺寸）。
+- [x] 域外像素给镜头校正的改进项已登记 `.agents/memory/FUTURE.md`（画质，不是尺寸）。
 
 ---
 

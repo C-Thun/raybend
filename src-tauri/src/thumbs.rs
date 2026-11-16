@@ -369,7 +369,7 @@ fn full_flight_key(
 /// （每资产保留最新 2 份，§4.2）。
 ///
 /// **基准从 `asset.rel_path` 推**（`EditBase::of_file`）：调用方拿哪个文件来渲染，
-/// 缓存就落在哪一侧 —— 否则切了基准会读到另一基准的旧图（`memory/FUNCTION-IMAGING.md` §4.3）。
+/// 缓存就落在哪一侧 —— 否则切了基准会读到另一基准的旧图（`.agents/memory/FUNCTION-IMAGING.md` §4.3）。
 ///
 /// `pub(crate)`：`view_image` 与 `develop_preview_refresh`（进/出编辑那两下）共用这一份 ——
 /// preview 只允许有一条生成路径。

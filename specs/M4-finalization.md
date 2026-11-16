@@ -12,14 +12,14 @@
 真实 Windows 多软件打开、DPI、照片画质与性能由崔总验收；开发与可重复冒烟结束不能标成真机验收完成。
 
 
-收口证据：`implementations/2026-09-27_m4-finalization.md`。Pencil 编辑器修改由崔总保存，两份文件 2026-09-27 00:46 落盘已核对。Agent 验证的是单测、编译、合成 API/DOM、迁移与产物一致性；真实 Windows 外部应用打开及照片/DPI/颜色/性能待崔总验收，未勾作完成。未 push、tag、发布或生成安装包。
+收口证据：`.agents/implementations/2026-09-27_m4-finalization.md`。Pencil 编辑器修改由崔总保存，两份文件 2026-09-27 00:46 落盘已核对。Agent 验证的是单测、编译、合成 API/DOM、迁移与产物一致性；真实 Windows 外部应用打开及照片/DPI/颜色/性能待崔总验收，未勾作完成。未 push、tag、发布或生成安装包。
 
 
 ## 2026-09-27 真机验收回报：RAW 导出 Invalid forty two
 
 - [x] 定位截图错误并补可重现的 RW2/ORF 元数据测试（修前稳定复现 Invalid forty two）。
 - [x] 复用 media::tiff 的 RAW 头识别，修复导出 EXIF/XMP 读取与 RW2 的 XMP 尾部 NUL，保留标准元数据与损坏输入边界。
-- [x] 相关 Rust/Windows 回归、调试版重建/产物核对与独立实施记录（`implementations/2026-09-27_m4-raw-metadata-fix.md`；exe 01:29:57 CST）。
+- [x] 相关 Rust/Windows 回归、调试版重建/产物核对与独立实施记录（`.agents/implementations/2026-09-27_m4-raw-metadata-fix.md`；exe 01:29:57 CST）。
 
 ## 2026-09-27 导出文件重名策略与按钮细节
 
@@ -32,9 +32,9 @@
 
 - [x] 查找共享拖拽/多选/缩略图能力，同步 Pencil：半透明羽化扇形四缩略图、目标辅色边框、计数动效。
   - 预览几何与落点在 2026-09-28 按崔总补充改为「整叠中心对齐指针、队列区也是落点（亮主色框）、指针出窗即中止」，
-    见 `implementations/2026-09-28_export-drag-to-queue.md` 与 `design/export.md`（Pencil 稿待同步）。
+    见 `.agents/implementations/2026-09-28_export-drag-to-queue.md` 与 `design/export.md`（Pencil 稿待同步）。
 - [x] 共享入队支持明确目标预设；拖放不切预设、不取消选择，批内/队内去重与上下文/异步边界保持一致。
 - [x] 数字动效按真实新增数量计算，最多每秒 10 次，少量可短于 1 秒，其余约 1–3 秒、最长 3 秒；处理真实计数变动/重置与减少动态偏好。
 - [x] 核对 top / bottom Ctrl+A 统一命令与 Delete 仅移除未执行，补必要单测及自动化冒烟。
 
-本批代码与冒烟证据：`implementations/2026-09-27_m4-export-collision-and-drag.md`。Windows 主程序 03:33:55、worker 03:32:03 已核对；Pencil 编辑器已同步，本轮 export.pen 尚待保存落盘（磁盘仍为 00:46:36），不据此宣称设计文件已交付或真机验收完成。
+本批代码与冒烟证据：`.agents/implementations/2026-09-27_m4-export-collision-and-drag.md`。Windows 主程序 03:33:55、worker 03:32:03 已核对；Pencil 编辑器已同步，本轮 export.pen 尚待保存落盘（磁盘仍为 00:46:36），不据此宣称设计文件已交付或真机验收完成。

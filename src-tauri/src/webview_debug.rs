@@ -1,5 +1,5 @@
 //! **debug 构建自动开 WebView2 调试口（CDP）** —— 让 `pnpm debug:win` 出来的 exe
-//! 直接就能被探针连上，不必再记「带参数启动」那一长串（`memory/DEBUGGING.md` §1）。
+//! 直接就能被探针连上，不必再记「带参数启动」那一长串（`.agents/memory/DEBUGGING.md` §1）。
 //!
 //! ```text
 //! 以前：WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS='--remote-debugging-port=9333' WSLENV=... <exe>

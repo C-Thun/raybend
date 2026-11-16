@@ -65,7 +65,7 @@ import {
   type ThumbQueue,
 } from "../../components/ui/thumb-queue.ts";
 
-/** 时间片阈值的默认值（分钟）——`memory/DESIGN.md` §12.7 的「1 小时」 */
+/** 时间片阈值的默认值（分钟）——`.agents/memory/DESIGN.md` §12.7 的「1 小时」 */
 export const DEFAULT_GAP_MINUTES = 60;
 
 /** view/compare 按需读原片尺寸的等待上限；tiles 不等待元数据。 */
@@ -509,7 +509,7 @@ export function createPhotoGridStore(deps: PhotoGridDeps): PhotoGridStore {
    *   * 分块补、每块让出一帧：**任何一条命令都是短的**。
    *     以前是 `source_times` 一次读整目录（`TIMES_BATCH = 512`），真机 306 张要 6 秒，
    *     把那 6 秒里所有缩略图请求和整个界面都按住了（诊断：
-   *     `implementations/2026-10-11_import-still-slow-diagnosis.md`）。
+   *     `.agents/implementations/2026-10-11_import-still-slow-diagnosis.md`）。
    */
   const META_CHUNK = 48;
 

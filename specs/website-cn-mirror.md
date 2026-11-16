@@ -1,8 +1,8 @@
 # 官网国内镜像（rb.cthun.com）
 
-> 状态：**方案待拍板，未开工**（2026-10-24 从 `memory/FUTURE.md` 的 Future Release #6 移入「发版后」）
+> 状态：**方案待拍板，未开工**（2026-10-24 从 `.agents/memory/FUTURE.md` 的 Future Release #6 移入「发版后」）
 > 目标：给大陆访问一条不经过 GitHub Pages 的官网入口；页面优先，安装包是否镜像另定。
-> 相关：`memory/FUTURE.md` §「发版后」；`website/AGENTS.md` §5；`website/src/data/release.ts`。
+> 相关：`.agents/memory/FUTURE.md` §「发版后」；`website/AGENTS.md` §5；`website/src/data/release.ts`。
 
 ## 1. 背景
 
@@ -84,7 +84,7 @@
 - 按选定路线改 `.github/workflows/website.yml`（加 EdgeOne 部署步骤或部署钩子）。
 - 如需镜像下载：改 `website/src/data/release.ts` 的资产选择/URL 校验，补单测；必要时加 `SITE_URL` 按域名切换（默认不改，canonical 指主站）。
 - 加 `website/edgeone.json`（仅 Git 集成路线）。
-- 更新 `website/AGENTS.md` 的部署说明与 `memory/FUTURE.md` 状态。
+- 更新 `website/AGENTS.md` 的部署说明与 `.agents/memory/FUTURE.md` 状态。
 
 ## 7. 验收清单
 

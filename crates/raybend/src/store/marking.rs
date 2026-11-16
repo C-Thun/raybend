@@ -1,13 +1,13 @@
 //! 标记写入与撤销：评分 / 色标 / 喜欢 / 锁 / 标签。
 //!
-//! 出处：`memory/FUNCTION-BROWSE.md` §3.2（标记系列）、§3.3（标签）、§3.4（锁）。
+//! 出处：`.agents/memory/FUNCTION-BROWSE.md` §3.2（标记系列）、§3.3（标签）、§3.4（锁）。
 //!
 //! # 三件容易做错的事，这里显式处理
 //!
 //! 1. **撤销要能精确还原**：所以每次改动都先读旧值，落成一组 [`Op`]
 //!    （`before` / `after` 都在里面），撤销就是把这组操作**反过来**执行一遍。
 //!    只记「改了哪些 id」是不够的 —— 批量打星时每张的旧值可能都不一样。
-//! 2. **锁要真的挡住写**（`memory/FUNCTION-BROWSE.md` §3.4）：二级锁（不可编辑）挡住标记与标签；
+//! 2. **锁要真的挡住写**（`.agents/memory/FUNCTION-BROWSE.md` §3.4）：二级锁（不可编辑）挡住标记与标签；
 //!    一级锁（不可删）只挡删除。**锁自己的修改不受锁限制** —— 否则锁上就解不开了。
 //! 3. **批量里有一半被锁住时**不能整批失败：能改的改掉，被挡的如实报回来
 //!    （返回值里有 `skipped_locked`，UI 才能提示「有 3 张被锁着没改」）。
@@ -16,7 +16,7 @@
 //!
 //! 它必须与「真的写进去了多少」一致：前端只发「标 3 星」，Rust 侧才知道哪几张因为
 //! 锁被跳过了。栈放在 Rust 侧，UI 只调 `undo` / `redo` 两个命令，不需要自己维护补丁。
-//! 栈是**内存态**（关软件即清）—— 与 `memory/FUNCTION-BROWSE.md` 对旗标的取舍一致。
+//! 栈是**内存态**（关软件即清）—— 与 `.agents/memory/FUNCTION-BROWSE.md` 对旗标的取舍一致。
 
 use std::collections::BTreeSet;
 
@@ -25,7 +25,7 @@ use rusqlite::{Connection,OptionalExtension};
 use crate::error::{Error, Result};
 use crate::store::time::now_millis;
 
-/// 合法色标（与 `memory/DESIGN.md` §1.4 的六个色标令牌一一对应）。
+/// 合法色标（与 `.agents/memory/DESIGN.md` §1.4 的六个色标令牌一一对应）。
 ///
 /// 顺序**不重要**（校验只看集合）；界面的面板顺序由前端的 `lib/color-labels.ts` 决定，
 /// 这里不重复一遍顺序，免得两处各自漂移。
@@ -115,7 +115,7 @@ pub const TEXT_FIELD_MAX_CHARS: usize = 2000;
 
 /// 建议输入的候选条数上限（每个字段：最近输入 + 库内已有值都在这个额度里）。
 ///
-/// 登记在 `memory/LIMITS.md`：这是**面板可读性**的闸门（下拉最多 8 行可见，
+/// 登记在 `.agents/memory/LIMITS.md`：这是**面板可读性**的闸门（下拉最多 8 行可见，
 /// 再多就要翻很久才找得到想要的那个），不是性能限制。
 /// 前端 `lib/text-history.ts::TEXT_SUGGEST_LIMIT` 必须与它同值。
 pub const TEXT_SUGGEST_LIMIT: usize = 20;
@@ -951,7 +951,7 @@ pub fn set_lock(conn: &Connection, ids: &[i64], level: u8, label: &str) -> Resul
     Ok(ChangeSet::new(label, ops))
 }
 
-/// 批量挂标签（批量只能加，`memory/FUNCTION-BROWSE.md` §3.3）。
+/// 批量挂标签（批量只能加，`.agents/memory/FUNCTION-BROWSE.md` §3.3）。
 pub fn attach_tags(
     conn: &Connection,
     ids: &[i64],

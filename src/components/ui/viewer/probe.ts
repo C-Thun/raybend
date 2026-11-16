@@ -29,7 +29,7 @@
  * ## 与「日志」的分工
  *
  * 它**不是**通用日志：只记 URL 生命周期这一条线，容量固定（环形 160 条），
- * 不占磁盘、不上报。要看现场的人用它；要留证据的写 `implementations/`。
+ * 不占磁盘、不上报。要看现场的人用它；要留证据的写 `.agents/implementations/`。
  */
 
 import { createSignal } from "solid-js";

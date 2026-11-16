@@ -1,7 +1,7 @@
 # M5 · crates.io 核心库同步发布（`specs/m5-crates-publish.md`）
 
 状态：**已实现并冒烟**（2026-10-09）；首次发布由崔总手工完成（`raybend 0.1.1`，2026-10-09T13:59:06Z）。
-归属：M5 分发与发布（`memory/PLAN.md` §3）。操作说明在 `docs/release.md` §9。
+归属：M5 分发与发布（`specs/PLAN.md` §3）。操作说明在 `docs/release.md` §9。
 
 ## 1. 目标与非目标
 

@@ -2,7 +2,7 @@
  * 诊断目录的前端封装（`specs/logging-and-crash-report.md` §9 的 W1/W2 部分）。
  *
  * 现在只有一条命令：**打开诊断目录** —— 出问题时能立刻摸到 `logs/` 与 `crashes/`。
- * 「导出报告包 / 复制报告摘要 / 一键发送」属第三层（W3/S1），**未开工**（见 `memory/FUTURE.md`）。
+ * 「导出报告包 / 复制报告摘要 / 一键发送」属第三层（W3/S1），**未开工**（见 `.agents/memory/FUTURE.md`）。
  */
 
 import { isTauriRuntime } from "./tauri-env.ts";

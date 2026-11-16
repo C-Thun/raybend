@@ -37,7 +37,7 @@ export const TEXT_FIELDS: readonly TextFieldKey[] = [
  * 每个字段保留多少条最近输入。
  *
  * 与 Rust 的 `marking::TEXT_SUGGEST_LIMIT` 同值（那边给「库内已有值」封顶，这边给最近输入封顶），
- * 登记在 `memory/LIMITS.md`。20 = 下拉 8 行可见、最多滚两屏，够覆盖一次旅行的常用地点。
+ * 登记在 `.agents/memory/LIMITS.md`。20 = 下拉 8 行可见、最多滚两屏，够覆盖一次旅行的常用地点。
  */
 export const TEXT_SUGGEST_LIMIT = 20;
 

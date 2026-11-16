@@ -9,8 +9,8 @@
 
 * `AGENTS.md`：§2.14（一轮清单要连续做完）、§2.15（新增功能必须同时决定热键）、
   §2.17（`untrack` 必须写在插入点，两面的教训）、§11.4/§11.5（术语与结构红线）。
-* `memory/DESIGN.md`：§8.8 / §8.9（滚动条占位与预留空间）、§12.10（状态水印与流光）、§13.1（直方图合成）。
-* 本批已落地的改动与理由：`implementations/2026-09-23_ui-batch-fullscreen-loading-density-zoom.md`。
+* `.agents/memory/DESIGN.md`：§8.8 / §8.9（滚动条占位与预留空间）、§12.10（状态水印与流光）、§13.1（直方图合成）。
+* 本批已落地的改动与理由：`.agents/implementations/2026-09-23_ui-batch-fullscreen-loading-density-zoom.md`。
 * 质量门（改完必跑，全绿才算完）：
 
   ```bash
@@ -33,10 +33,10 @@
 
 | 范围 | 状态 |
 | --- | --- |
-| **M3-W1 / W2**（编辑器视口：透明挖洞 + wgpu 直绘 + 真实照片 + 渲染线程与监督器） | ⚠️ W2 的「人类已验」不成立 —— 崔总澄清「GPU 视图出图从来没 work 过」。**2026-09-24 已定位并修复根因**（`body` 不透明底色挡死 wgpu），真机复验归人类，见 `implementations/2026-09-24_bugfix-batch-t1-t8.md` §8 |
+| **M3-W1 / W2**（编辑器视口：透明挖洞 + wgpu 直绘 + 真实照片 + 渲染线程与监督器） | ⚠️ W2 的「人类已验」不成立 —— 崔总澄清「GPU 视图出图从来没 work 过」。**2026-09-24 已定位并修复根因**（`body` 不透明底色挡死 wgpu），真机复验归人类，见 `.agents/implementations/2026-09-24_bugfix-batch-t1-t8.md` §8 |
 | **M3-W3**（显影管线位置、RAW 线性源、编辑栈/issue 落库） | ⬜ **未开工** —— 规划与必答问题在 `specs/HANDOFF-2026-09-23-w3.md`；崔总 2026-09-23 定：本轮只做 bug 修复，**未得明确指令不进 W3** |
 | 今天下午/晚上这批（全屏看图、载入流光、直方图固定色、密度与滚动条、17 档重排） | ✅ 完成并提交（`7ff75fb` / `8acb352` / `6b7f76c` / `1df90d1` / `472322d`） |
-| **本文档 §2 的 8 条问题** | ✅ **T1–T8 全部落地**（含崔总四条澄清的重做）—— 实施记录见 `implementations/2026-09-24_bugfix-batch-t1-t8.md`，真机验收清单在那一份 §10 |
+| **本文档 §2 的 8 条问题** | ✅ **T1–T8 全部落地**（含崔总四条澄清的重做）—— 实施记录见 `.agents/implementations/2026-09-24_bugfix-batch-t1-t8.md`，真机验收清单在那一份 §10 |
 
 ---
 
@@ -157,7 +157,7 @@
 
 ## 3. 顺带更正一条旧笔记（别再去查）
 
-`implementations/2026-09-23_fullscreen-viewer.md` 的遗留第 2 条说「TS 的 `ImagePurpose` 含 `original` 但 Rust 不认」——
+`.agents/implementations/2026-09-23_fullscreen-viewer.md` 的遗留第 2 条说「TS 的 `ImagePurpose` 含 `original` 但 Rust 不认」——
 **这是错的**：`crates/raybend/src/display/mod.rs` 的 `ImagePurpose::parse` **支持四个意图**
 （`grid / strip / screen / original`，有单测 `purpose_parsing_covers_the_four_intents_and_rejects_junk` 盯着）。
 我当时看的是 `thumbnail/render.rs` 里 `SizeClass::parse`（那个只有三档，是**另一套**枚举）。

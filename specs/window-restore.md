@@ -2,7 +2,7 @@
 
 > 2026-10-31 ｜ 状态：**已实施** ｜ 依据崔总 2026-10-31 的十项决定
 > 关联：`specs/window-work-area-layout.md`（Shift+点击最大化键的留白布局，本次直接复用）
-> 实施记录：`implementations/2026-10-31_window-restore-and-single-instance.md`
+> 实施记录：`.agents/implementations/2026-10-31_window-restore-and-single-instance.md`
 
 ## 1. 目标
 

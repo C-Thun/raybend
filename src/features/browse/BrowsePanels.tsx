@@ -1,5 +1,5 @@
 /**
- * 浏览工作区的左右两列（`memory/FUNCTION-BROWSE.md` §4 / §6、`design/browse.md` §2.2 / §2.4）。
+ * 浏览工作区的左右两列（`.agents/memory/FUNCTION-BROWSE.md` §4 / §6、`design/browse.md` §2.2 / §2.4）。
  *
  * 左列 = **库目录选择器**：搜索条 + 紧缩库列表 + 库内目录树。
  * 右列 = **信息栏**：tiles 模式下显示 EXIF 与文件信息（看图模式另有预览+直方图，属 W2）。
@@ -60,7 +60,7 @@ import type { BrowseStore } from "./store.ts";
  * 左列：库目录选择器
  * ══════════════════════════════════════════════════════════════ */
 
-/** 紧缩库列表最多显示几个（第 4 个只露半截，见 `memory/FUNCTION-BROWSE.md` §4.2）。 */
+/** 紧缩库列表最多显示几个（第 4 个只露半截，见 `.agents/memory/FUNCTION-BROWSE.md` §4.2）。 */
 export const COMPACT_REPO_LIMIT = 3;
 
 /** 拖动停在目录行上多久之后自动展开它（毫秒；崔总 2026-11-05）。 */
@@ -81,7 +81,7 @@ export interface BrowseLeftColumnProps {
   /**
    * 库列表处于展开态（受控）。
    *
-   * 为什么由外面管：**收起要由「用户在 browse mid 里点了一下」触发**（`memory/FUNCTION-BROWSE.md` §4.2），
+   * 为什么由外面管：**收起要由「用户在 browse mid 里点了一下」触发**（`.agents/memory/FUNCTION-BROWSE.md` §4.2），
    * 而那个点击发生在网格/看图那边 —— 状态住在这里就没法从外面收。
    */
   libsExpanded?: boolean;
@@ -136,7 +136,7 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
   /** 本次会话里的库顺序（点库移顶）。 */
   const [order, setOrder] = createSignal<readonly string[]>([]);
 
-  /* ══ 目录工具栏的两个动作（`memory/FUNCTION-BROWSE.md` §4.3）══ */
+  /* ══ 目录工具栏的两个动作（`.agents/memory/FUNCTION-BROWSE.md` §4.3）══ */
 
   /**
    * 每个目录的**浅**检查结果（能不能删）—— 选中变了就查一次，按钮跟着它 enable/disable。
@@ -175,7 +175,7 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
   const filtered = createMemo(() => {
     const needle = search().trim().toLowerCase();
     if (needle === "") return ordered();
-    // 搜索条第一版**只搜库名与目录名**（`memory/FUNCTION-BROWSE.md` §4.1）
+    // 搜索条第一版**只搜库名与目录名**（`.agents/memory/FUNCTION-BROWSE.md` §4.1）
     return ordered().filter((repo) => repo.name.toLowerCase().includes(needle));
   });
 
@@ -183,7 +183,7 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
   const needle = () => search().trim().toLowerCase();
 
   /*
-   * 缩起态的截断（`memory/FUNCTION-BROWSE.md` §4.2）：≤3 个库不显示「查看所有库」、留白也不要；
+   * 缩起态的截断（`.agents/memory/FUNCTION-BROWSE.md` §4.2）：≤3 个库不显示「查看所有库」、留白也不要；
    * >3 个时第 4 位是伪卡片，容器钉成 3.5 张卡片高、被 `overflow: hidden` 切掉下半截。
    * 判定全在 `libs.ts`（有单测），这里只管摆。
    */
@@ -233,7 +233,7 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
         await syncDirectoryCounts(repositoryId, store.scopePath() ?? relPath, [relPath]);
       }
       if (base !== root() || repositoryId !== store.repositoryId()) return;
-      // 保留目录 `_RAW` 不进树（`memory/FUNCTION-REPOSITORY.md` §4.1），别的原样
+      // 保留目录 `_RAW` 不进树（`.agents/memory/FUNCTION-REPOSITORY.md` §4.1），别的原样
       const visible = visibleChildDirs(entries);
       setChildren((prev) => {
         const next = new Map(prev);
@@ -512,7 +512,7 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
       else next.add(relPath);
       return next;
     });
-    // 展开时读那一级（`memory/FUNCTION-BROWSE.md` §4.3：展开只跟用户操作相关）
+    // 展开时读那一级（`.agents/memory/FUNCTION-BROWSE.md` §4.3：展开只跟用户操作相关）
     if (!isExpanded && children().get(relPath) === undefined) {
       void loadChildren(relPath);
     }
@@ -526,7 +526,7 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
    * * 到点前再确认一次指针还在同一行（计时期间可能已经走了）；
    * * 当前范围那一行也不计时（它是照片的出处，展开它没有意义）。
    *
-   * 边缘自动上下滚动**没做**，已登记 `memory/FUTURE.md`。
+   * 边缘自动上下滚动**没做**，已登记 `.agents/memory/FUTURE.md`。
    */
   let autoExpandTimer: number | undefined;
   let autoExpandTarget: string | null = null;
@@ -561,7 +561,7 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
   }));
 
   function selectRepository(id: string): void {
-    // 移顶**只在展开态**发生（`memory/FUNCTION-BROWSE.md` §4.2）：缩起态在顶部三张之间来回切不该移位
+    // 移顶**只在展开态**发生（`.agents/memory/FUNCTION-BROWSE.md` §4.2）：缩起态在顶部三张之间来回切不该移位
     if (libsOpen()) {
       setOrder((prev) => [id, ...prev.filter((x) => x !== id)]);
     }
@@ -752,7 +752,7 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
       />
 
       {/*
-        库列表（`memory/FUNCTION-BROWSE.md` §4.2 的紧缩 / 展开）：
+        库列表（`.agents/memory/FUNCTION-BROWSE.md` §4.2 的紧缩 / 展开）：
         * 缩起态：≤3 张就只占它需要的高度；>3 张时第 4 位放伪卡片、容器钉成 3.5 张卡高（下半截被切掉）；
         * 展开态：占据剩余空间、自己滚，目录树缩到最小值。
       */}
@@ -808,7 +808,7 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
         </For>
         <Show when={hasMore()}>
           {/*
-            第 4 位的**伪卡片**（`memory/FUNCTION-BROWSE.md` §4.2）：与真卡片同宽同高、同样的圆角与面，
+            第 4 位的**伪卡片**（`.agents/memory/FUNCTION-BROWSE.md` §4.2）：与真卡片同宽同高、同样的圆角与面，
             内容只有一行「查看所有库」并**靠卡片顶部** —— 下半截会被容器切掉，
             于是看起来是「上圆角、下直角」的半张卡。
           */}
@@ -912,7 +912,7 @@ export function BrowseLeftColumn(props: BrowseLeftColumnProps) {
         删除目录的确认。
 
         这里是**真的在磁盘上删目录**（不是「从集合里移除」），所以刻意**不做**
-        `easy destroy` 的 Shift 快通道（`memory/DESIGN.md` §12.2 那条是为移除类操作定的）。
+        `easy destroy` 的 Shift 快通道（`.agents/memory/DESIGN.md` §12.2 那条是为移除类操作定的）。
         能删的时候目录里已经没有照片、也没有子目录了（判据见 `repo::dirs`），
         但一旦删错就无法撤销，弹一次值得 —— 「莫名其妙少了个目录、还要找少了哪个」太恼火。
       */}
@@ -1015,7 +1015,7 @@ export interface AssetInfoProps {
    * 两样都挂在 store 上）。
    */
   store: BrowseStore;
-  /** 当前锚点那张（多选时是它，见 `memory/FUNCTION-BROWSE.md` §5.10）。 */
+  /** 当前锚点那张（多选时是它，见 `.agents/memory/FUNCTION-BROWSE.md` §5.10）。 */
   item: AssetItem | null;
   /** 当前展示文件的绝对路径；只为选中项按需读完整 EXIF。 */
   fileExif?: FileExif | null;
@@ -1023,7 +1023,7 @@ export interface AssetInfoProps {
   pending?: boolean;
   /**
    * 看图态下把看图件的 store 传进来：右栏的**拍摄信息让位给预览 + 直方图**
-   * （`memory/FUNCTION-BROWSE.md` §5.9）；tiles 模式下传 `null`，保持原来的 EXIF。
+   * （`.agents/memory/FUNCTION-BROWSE.md` §5.9）；tiles 模式下传 `null`，保持原来的 EXIF。
    */
   viewer?: ViewerStore | null;
   /**
@@ -1426,7 +1426,7 @@ function cameraText(item: AssetItem): string | null {
  * 拍摄信息（EXIF 那一段）。
  *
  * 抽成独立组件是为了让 `AssetInfo` 能在**看图态把它换成预览 + 直方图**
- * （`memory/FUNCTION-BROWSE.md` §5.9）。tiles 态展示选中文件的完整 EXIF，内容过长时只滚动本区。
+ * （`.agents/memory/FUNCTION-BROWSE.md` §5.9）。tiles 态展示选中文件的完整 EXIF，内容过长时只滚动本区。
  */
 function ExifSection(props: { item: AssetItem; file: FileExif | null }): JSX.Element {
   const rows = (): MetadataRow[] => {
@@ -1693,7 +1693,7 @@ export function AssetInfo(props: AssetInfoProps) {
   return (
     /*
      * 右栏信息面板的**滚动容器**：
-     *   * `scroll-y-reserved` → 滚动条落在预留空间里（`memory/DESIGN.md` §8.9）；
+     *   * `scroll-y-reserved` → 滚动条落在预留空间里（`.agents/memory/DESIGN.md` §8.9）；
      *   * 横向 padding 走**密度令牌**（人类 2026-09-23：宽松档下 browse 右列
      *     以前写死 `p-2`、两档一个样 —— 「这宽松了个啥」）；
      *   * 滚动侧（右）用 `--panel-pad-scroll`，比左侧小 4px：滚动条自己占的是
@@ -1714,7 +1714,7 @@ export function AssetInfo(props: AssetInfoProps) {
         fallback={<p class="p-2 text-fs-2 text-fg-3">{t("browse.noSelection")}</p>}
       >
         {/*
-          看图态：拍摄信息**让位**给预览 + 直方图（`memory/FUNCTION-BROWSE.md` §5.9）——
+          看图态：拍摄信息**让位**给预览 + 直方图（`.agents/memory/FUNCTION-BROWSE.md` §5.9）——
           看片时关心的是「这块亮不亮」而不是「光圈多少」；退出看图就换回来。
           文件信息两块都不动（它下面还在）。
         */}

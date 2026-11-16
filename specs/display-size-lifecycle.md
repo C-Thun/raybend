@@ -153,7 +153,7 @@ UPDATE issues        SET output_width = NULL, output_height = NULL
 
 **待补的便利设施**（不是正确性缺口）：库里长期存在 NULL 的 RAW 行时，可以在开库后跑一个
 **有界限的后台补齐**（逐目录、可中断），省得用户必须挨个点开或敲 CLI。已登记在
-`memory/PLAN.md` 的问题清单里，本轮不做。
+`specs/PLAN.md` 的问题清单里，本轮不做。
 
 ## 6. 不做（边界）
 

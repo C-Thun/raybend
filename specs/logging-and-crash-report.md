@@ -1,10 +1,10 @@
 # 日志、崩溃采集与问题报告
 
 **状态**（2026-10-12 更新）：**W1 / W2 / W4 / W3-α 已施工**（运行日志 + panic/未正常退出记录 + 独立崩溃助手 + **崩溃后弹窗/另存导出的报告包**，崔总当日指示：先把日志这套建起来；发送/接收留以后）：
-选型改定：**自研轻量 writer**，不用 `flexi_logger` —— 核实源码后确认它给不了有界队列与按目录总容量清理，见 `implementations/2026-10-12_diagnostics-logs-and-crashpad.md`。
-**W3 剩余（报告对话框 / 「导出诊断包」命令 / 复制报告摘要 / `mailto:` 预填）与 W5（WebView2 ProcessFailed / 前端上报 / 卡死看门狗）未开工**；**S1 服务端（T1 一键上传）仍留在 `memory/FUTURE.md`，崔总明确「发送接收以后再说」**。
-**关联**：`memory/FUTURE.md`「🧊 发版后（after release）可立即做」（登记条目）与 J 节（原「日志与诊断包」半句的落点即本文件）；
-`docs/privacy.md` / `docs/privacy.en.md`（发送功能落地时**同批**更新）；`AGENTS.md` §2.8 §2.12 §2.15 §2.16 §2.19 §2.20 §5.3、`memory/DEBUGGING.md`（日志与崩溃记录怎么看）。
+选型改定：**自研轻量 writer**，不用 `flexi_logger` —— 核实源码后确认它给不了有界队列与按目录总容量清理，见 `.agents/implementations/2026-10-12_diagnostics-logs-and-crashpad.md`。
+**W3 剩余（报告对话框 / 「导出诊断包」命令 / 复制报告摘要 / `mailto:` 预填）与 W5（WebView2 ProcessFailed / 前端上报 / 卡死看门狗）未开工**；**S1 服务端（T1 一键上传）仍留在 `.agents/memory/FUTURE.md`，崔总明确「发送接收以后再说」**。
+**关联**：`.agents/memory/FUTURE.md`「🧊 发版后（after release）可立即做」（登记条目）与 J 节（原「日志与诊断包」半句的落点即本文件）；
+`docs/privacy.md` / `docs/privacy.en.md`（发送功能落地时**同批**更新）；`AGENTS.md` §2.8 §2.12 §2.15 §2.16 §2.19 §2.20 §5.3、`.agents/memory/DEBUGGING.md`（日志与崩溃记录怎么看）。
 
 ---
 
@@ -516,7 +516,7 @@ Caddy（TLS + 第一层 body 上限/速率）  →  axum 接收服务（单静�
 * **§2.20 界面文案**：只写带变量的句子（版本/报告 ID/大小/原因），不做说明书。
 * **§2.21 编辑器快照**：不涉及（不碰 `confirmEdit`、不在拖动路径上落库）。
 * **§5.1 设计稿先行**：报告对话框与提示条开工前出 `.pen` + `.md`。
-* **§5.2 实施记录**：开工后每波一份 `implementations/`；本次定档记录见 `implementations/2026-10-10_logging-and-crash-report-spec.md`。
+* **§5.2 实施记录**：开工后每波一份 `.agents/implementations/`；本次定档记录见 `.agents/implementations/2026-10-10_logging-and-crash-report-spec.md`。
 * **§5.3 构建红线**：助手二进制进包 + `check:win` 核对；构建顺序（先 `pnpm build`）不变。
 
 ---

@@ -15,7 +15,7 @@
 //!    _distorted_ coordinate」）。上游 `EnableDistortionCorrection` 也是
 //!    `Reverse==false → Dist_*`。
 //!    ⚠️ **`lensfun` crate 的 README 示例写的是 `true`（说 true 才是校正）—— 那是文档错**，
-//!    实施时用真照片验证过方向（见 `implementations/`）。
+//!    实施时用真照片验证过方向（见 `.agents/implementations/`）。
 //! 2. **顺序**：暗角是在**原始像素**上测的 ⇒ 增益要按**源坐标**取，而不是目标坐标。
 //! 3. **一次重采样**：畸变与 TCA 的坐标一起变换，只插值一次（官方原话）。
 //! 4. **归一化坐标**：`NormScale = hypot(36,24) / crop / hypot(W+1, H+1) / real_focal`
@@ -25,7 +25,7 @@
 //! # 与上游的两处**有意偏离**
 //!
 //! * 上游在 u8/u16 上做暗角（定点乘法）；我们在**线性 u16** 上做 —— 乘性增益与色彩空间无关，
-//!   而线性域少一次量化（`memory/FUTURE.md` D1 的 scene-referred 口径）。
+//!   而线性域少一次量化（`.agents/memory/FUTURE.md` D1 的 scene-referred 口径）。
 //! * 采样越界时**夹取**而不是留黑边：自动缩放（[`LensMap::auto_scale`]）已经保证源图铺满画布，
 //!   夹取只是病态系数下的兜底（宁可边缘拉伸，也不要四角黑块）。
 //!

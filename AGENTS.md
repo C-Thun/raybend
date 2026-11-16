@@ -1,15 +1,22 @@
 # raybend — 项目指南（AGENTS.md）
 
 > 本文件是 raybend 的**项目级 AGENTS.md**，只保留**每次会话都需要**的纪律、命令与索引；
-> 细节记忆按主题放在 `memory/`（§10 有完整索引与记忆体规范），用到再读。
+> 细节记忆按主题放在 `.agents/memory/`（§10 有完整索引与记忆体规范），用到再读。
 > 全局约定（包管理、URL 书写、称呼等）见 `~/.pi/agent/AGENTS.md`，本文件不重复。
 >
 > **需要人类做的事**（装工具链、授权、提供样本、目视确认、真机 E2E 等）**直接在对话里说**，
-> 不维护「待办清单」文件；需要留痕的写进 `implementations/` 记录或相应文档，人类做完之后
+> 不维护「待办清单」文件；需要留痕的写进 `.agents/implementations/` 记录或相应文档，人类做完之后
 > Agent 把结论记进同一处。Agent 的验收到**单元测试**为止：单元测试通过即认为功能完成，
 > 可以报告给用户去做 E2E 与真实环境确认。
 >
-> 建立时间：2026-09-15 ｜ 最近重构：2026-10-12（工具改介绍性表述、排查工具外迁 `memory/DEBUGGING.md`；读代码了解事实写入工作方式）
+> 建立时间：2026-09-15 ｜ 最近重构：2026-11-15（adopt agent-framework v1：记忆迁 `.agents/memory/`、计划迁 `specs/PLAN.md`、`todos/` 退役）
+>
+> **记忆契约（三条；详规 `.agents/memory/README.md`）**
+> ① `specs/PLAN.md` 记「要做什么」，`specs/<unit>.md` 一份工作单元，`.agents/memory/` 记「已知 / 已定 / 为什么」，`.agents/implementations/` 一次改动一条记录。
+> ② **一个事实一个家**：细节住在拥有它的文件里，别处只写指针（`路径#章节`），不抄第二份；找东西先看 §10 的索引。
+> ③ **先规格后改动**：实现前规格在 `specs/`，改完记录进 `.agents/implementations/`；**进度只认 todo 工具**，任何文档都不维护第二份进度表。
+>
+> 章节号固定不变（§8 / §9 已并入 `specs/PLAN.md` 与 `.agents/memory/FINISHED.md`，号位留空不重排，跨文件 `§N` 引用按号查）。
 
 ---
 
@@ -23,7 +30,7 @@ raybend（中文名**「光伴」**，产品名 `RayBend`）是一个**相片管
 
 - **主战场**：相片管理全流程——导入 → 浏览 → 评级/打标 → 筛选/搜索 → 集合整理 → 导出。
 - **编辑已是第一阶段主线**（2026-09-21 重排）：M3 = GPU 显影工作台，同一界面对 RAW/JPG 做无损编辑，
-  含常规调整、CUBE LUT、SOOC/issue；路线见 `memory/PLAN.md`，技术方向见 `memory/FUTURE.md` D 节。
+  含常规调整、CUBE LUT、SOOC/issue；路线见 `specs/PLAN.md`，技术方向见 `.agents/memory/FUTURE.md` D 节。
 - **平台**：Windows 优先（Win10/11）；macOS / Linux 属远期。
 - **相机支持策略**：不追求最新机型即时适配，跟得上主流即可。
 - **许可**：**AGPL-3.0-only**（见根下 `LICENSE`）。本项目主体是本地桌面应用，AGPL 的网络条款只在「对外提供网络服务」时咬合；它带来的好处是 rawler（LGPL-2.1-only）、darktable / RawTherapee（GPL-3.0）与 RapidRAW（AGPL-3.0）的代码都可合法复用。项目以开源方式发布，不计划闭源收费。
@@ -41,27 +48,30 @@ raybend（中文名**「光伴」**，产品名 `RayBend`）是一个**相片管
 3. **工具链只有 pnpm + cargo**：前端与脚本用 pnpm，Rust 用 cargo。禁止 npm / yarn / bun 或混用锁文件——仓库只允许 `pnpm-lock.yaml` 与 `Cargo.lock`。（`npm install -g` 仅限本机全局 CLI 工具。）
 4. **前端不写图像算法**：像素、色彩空间、视口变换、渲染管线全部属于 Rust。前端只负责交互状态、矢量覆盖层与 UI。
 5. **不引入 SolidStart**（桌面应用无 SSR 需求；Start v2 面向 Solid v1，与 Solid 2 不配套）。
-6. **Pencil 设计纪律**：界面设计用 Pencil 画 `.pen` 存 `design/`，每个 `.pen` 配**同名 `.md`**（§5.1）。
-7. **实施记录纪律**：每次编写/改动完成后在 `implementations/` 写一份记录（§5.2）。
+6. **设计稿纪律（paintress）**：界面设计稿用 **paintress**（MCP 工具 / CLI）读写，存 `design/`，
+   每个稿配**同名 `.md`**；**新建文件一律 `.ptr`**（`.pen` 为兼容格式，现有稿继续维护）；
+   **不再使用 Pencil**（pen.dev 编辑器与 CLI 都已弃用）。
+   工具用法、节点 schema 与坑见 `.agents/memory/PAINTRESS.md`，纪律见 §5.1。
+7. **实施记录纪律**：每次编写/改动完成后在 `.agents/implementations/` 写一份记录（§5.2）。
 8. **测试分工——Agent 验收到单元测试为止，E2E 归人类**：编译与单元测试通过即认为功能完成，可以报告给用户去做 E2E；GUI 交互与视觉正确性、多显示器与 DPI、真实照片库、性能体感、色彩正确性由人类在真实环境确认。报告必须区分「单元测试已验证」与「未经人类验证」。E2E 自动化须写成可重复执行的测试代码，不临时手跑。
-9. 新增顶层框架或大型依赖前在会话中讨论，候选方案登记到 `memory/FUTURE.md`。
+9. 新增顶层框架或大型依赖前在会话中讨论，候选方案登记到 `.agents/memory/FUTURE.md`。
 10. **单元测试必须齐备**（交付模块必须同时交付测试）：覆盖边界（空输入/单元素/上下限/非法值/Unicode 与中文/超长路径/大小写规范化/并发竞争/溢出截断），`cargo test` 与 `pnpm test` 保持秒级；重负载降为小规模合成数据或 `#[ignore]` 手动基准。
-11. **遇到难题：反复尝试未能突破的可以跳过、记录、继续走**。这是防死胡同的出口，不是遇难即跳。能绕过就把「问题 + 绕法 + 风险」写进 `implementations/` 并在对话里说一声；绕不过去（继续会踩空或污染已完成部分）可以做其它能做的，攒到没有可开工任务时汇总请求协助。判据是「绕过之后剩下的事还成不成立」，不是「难不难」。**进度只能往前走。**
+11. **遇到难题：反复尝试未能突破的可以跳过、记录、继续走**。这是防死胡同的出口，不是遇难即跳。能绕过就把「问题 + 绕法 + 风险」写进 `.agents/implementations/` 并在对话里说一声；绕不过去（继续会踩空或污染已完成部分）可以做其它能做的，攒到没有可开工任务时汇总请求协助。判据是「绕过之后剩下的事还成不成立」，不是「难不难」。**进度只能往前走。**
 12. **复用优先**：同一能力只允许一套实现，「两种表达」本身就是 bug。动手前**研判有哪些可复用的子模块**，
     再到仓里找（**基础组件清单见 §12**、`lib/`、同类工作区那份）→ **读它的源码**（读，不是猜）；有 → 改它、一般化它，
-    **绝不写第二份**；没有 → 才新建，并在 `implementations/` 写清「为什么现有的扩不了」+ **把新基础组件补进 §12**。
+    **绝不写第二份**；没有 → 才新建，并在 `.agents/implementations/` 写清「为什么现有的扩不了」+ **把新基础组件补进 §12**。
     ❗**用户指定参考哪个功能时，全部精力用于复用那份参考**，不许照着重做（2026-10-11 教训：让参考 export 的
     拖动，结果写了第二套 —— 尺寸/透明度/命中方式全不一样，用户看到「同一个手势两个效果」）。
-    **画稿与既有实现冲突时以既有实现为准**（Pencil 定「要什么」，不定「另一套怎么写」）。重构是日常动作。
+    **画稿与既有实现冲突时以既有实现为准**（画稿定「要什么」，不定「另一套怎么写」）。重构是日常动作。
 13. **本地应用实时性优先，丢掉 web 式缓存思维**：桌面程序外部的磁盘状态会变，「载入一遍不动」是错的；默认每次进入/展开/重读重新读盘（readdir 是微秒级）。要防的是「疯狂扫描」（同秒反复全盘扫描、无上限递归），不是多扫几遍。实时性与性能冲突时，把「多久算过期」写出来让人类拍板。
 14. **一轮清单要连续做完**：人类给一批事项 = 一直做到没有可做的。停下的正当理由只有两个：
-    真需要人类协助（直接说）、继续会踩空或污染已完成部分。中间只写 `implementations/`，不逐项请示（§5.5）。
+    真需要人类协助（直接说）、继续会踩空或污染已完成部分。中间只写 `.agents/implementations/`，不逐项请示（§5.5）。
 15. **新功能必须评估命令体系接入**：用户可触发的功能登记进 `features/commands/catalog.ts` → 命令面板（`Ctrl+K`）/
     快捷键设置 / 菜单；❗**默认热键或明确留空（写明理由）在同一次改动里给出**，不做事后审计
     （选键过 `lib/commands.ts::detectConflicts` 与 `lib/key-chords.ts::RESERVED_CHORDS`，文案走 `keyLabel`/`formatChord`）。
     不接入的，实施记录要写理由。
 16. **数据库 schema 变化只走现有迁移框架**（`crates/raybend/src/store/migration.rs` + `store/migrations/*.sql`）：版本闸门、`VACUUM INTO` 迁移前快照、逐条事务、完整性检查。禁止启动时临时 `ALTER`、另造迁移通道、静默删库重建；localStorage 等设备级偏好用**版本化 key + 显式一次性迁移**。
-17. **Solid 壳组件透传 children：`untrack` 写在插入点**——`{untrack(() => props.children)}`（就写在 JSX 那一行）；**禁止**提到组件 body 里提前求值。A/B 两面的完整教训、判据与回归脚本见 `memory/ARCHITECTURE.md` §9。
+17. **Solid 壳组件透传 children：`untrack` 写在插入点**——`{untrack(() => props.children)}`（就写在 JSX 那一行）；**禁止**提到组件 body 里提前求值。A/B 两面的完整教训、判据与回归脚本见 `.agents/memory/ARCHITECTURE.md` §9。
 18. **禁止全盘搜索**：不许 `find /`、`grep -r /` 这类从根往下的扫描（会把 `/mnt` 一起卷进来）。查询从本仓开始；第三方源码走确定路径：cargo 依赖在 `~/.cargo/registry/src/index.crates.io-*/`、pnpm 依赖在仓内 `node_modules/`、参考实现在 `/home/andares/repos/refers/<name>/`；不确定路径时 `ls` 父目录一层。
 19. **新增/改动功能必须同步评估 XMP 侧影响**（崔总 2026-09-30 定）：凡是改动会进 sidecar 的数据（编辑栈 / issue / 评级 / 色标 / 标签 / 文字 / 地点等）或其存储布局（目录、命名、`_RAW/` 规则），必须在**同一次改动**里判断并接好对 XMP sidecar 写出与读回的影响（规格：`specs/xmp-sidecar.md`），**不得延后欠账**——例：将来改地理位置功能的落地方式时，`photoshop:` / `Iptc4xmpCore:` 那一侧的映射要一起动。**新增无损编辑参数按 §13.1 的固定清单走**（参数表 → 渲染 → 版本 → XMP 归类 → 测试）。
 20. **界面不加「不带变量的固定说明文字」**（崔总 2026-10-08）：判据是**这句话里有没有随数据变化的量**
@@ -83,14 +93,14 @@ raybend（中文名**「光伴」**，产品名 `RayBend`）是一个**相片管
 
 23. **改动前做足影响调研**（崔总 2026-10-11）：软件越完善，一个改动牵动的模块越多（做回收站就要同时动扫描、
     目录同步门禁、目录树、缓存、XMP 侧车、命令注册）。动手前列「会碰到哪些模块 / 调用方」，改完逐项核，
-    结论写进 `implementations/`。
+    结论写进 `.agents/implementations/`。
 
 24. **库外（import）与库内是两套口径：import 一律 JPEG、不碰缓存、窗口优先**（崔总 2026-10-11 定）：
     动手前问「这段代码服务哪个场景」——import 面对的是**外部目录**（相机卡 / SD 卡 / 待入老库 / 临时盘），
     **导入完就不会再访问**；库内（浏览 / 编辑 / 导出）相反：有 catalog + 缩略图缓存，同一张图会被反复看几十次。
     * **小图格式**：库内 **384 小图 AVIF q80 / 4:4:4**（每库 15 万张 / 2 GiB 预算，2026-10-25 定）；
       **1920 预览与真身仍 AVIF q90**。**import（来源目录 / 未入库）一律 JPEG** —— 那里要的是「最快出现」，不追求画质与体积。
-      给 import 做 AVIF 是纯负优化（实测单张编码 118 ms vs JPEG 3–5 ms，依据 `implementations/2026-10-11_import-tiles-diagnosis.md`）。
+      给 import 做 AVIF 是纯负优化（实测单张编码 118 ms vs JPEG 3–5 ms，依据 `.agents/implementations/2026-10-11_import-tiles-diagnosis.md`）。
     * **禁止在来源目录上折腾缓存**：预热 / 持久化 / 失效策略 / 命中率 / GC 都不是 import 的课题 ——
       SD 卡导入完就清、临时目录不会回来、thumbcache 那套在 import 里没有有效期可言。
       用户看到的「越优化越慢」就是这么来的。
@@ -139,14 +149,14 @@ raybend（中文名**「光伴」**，产品名 `RayBend`）是一个**相片管
 
 28. **硬性上限集中登记**（崔总 2026-10-31 定）：凡是**为性能 / 面板体积 / 侧车体积**设的硬上限
     （LUT 链 8 层、单张定稿 32、编辑区 32 层、标签 5000 …），必须在**同一次改动里**登记进
-    `memory/LIMITS.md`，并写清「代码唯一真相在哪 / 到顶时的行为 / 为什么是这个数」。
+    `.agents/memory/LIMITS.md`，并写清「代码唯一真相在哪 / 到顶时的行为 / 为什么是这个数」。
     同一个上限**只许有一个常量**，别处引用它；改上限 = 改一处代码 + 改那一行表格。
 
 29. **错误与提示只走统一消息通道**（崔总 2026-11-01）：操作失败 / 落库失败 / 取样失败 / 读库失败
     一律 `Toast`（`props.toast.show`，组装层建、往下传），**禁止**在工作区与面板里随手塞内联红字。
     唯一例外是**对话框内的表单校验**（错误属于那个字段，弹到背后的 toast 看不到）。
     自查：`grep -rn 'text-danger' src` 命中的应当是图标 / 危险按钮配色或对话框内联校验。
-    口径与判据见 `memory/COMPONENTS.md` §3.4。
+    口径与判据见 `.agents/memory/COMPONENTS.md` §3.4。
 
 30. **执行任何指令前先估它的磁盘压力**（崔总 2026-11-05 定，真机事故）：开发机是 WSL，仓库与
     `target/` 都在虚拟盘上 —— **一条命令的代价能差几个数量级，判据在「遍历范围」，不在命令名字**。
@@ -165,25 +175,10 @@ raybend（中文名**「光伴」**，产品名 `RayBend`）是一个**相片管
 
 ---
 
-## 3. 版本基线（2026-09-15 核实）
+## 3. 版本基线
 
-> ⚠️ 下表只描述 raybend 软件本体；`website/`（官网）是**另一套选型**，见 §4 与 `website/AGENTS.md`。
-
-| 层 | 选型 | 当前版本 | 备注 |
-| --- | --- | --- | --- |
-| 外壳 | Tauri | `@tauri-apps/cli` 2.12.4（3.0 alpha） | 分层为 3.0 迁移做准备（`memory/ARCHITECTURE.md` §6.2） |
-| 构建 | Vite | 8.x | |
-| UI | Solid | **1.9.x**；`@solidjs/router` 1.0.1 | Solid 2 仍 RC，迁移登记 `memory/FUTURE.md` |
-| 样式 | Tailwind CSS | 4.3.5 | CSS-first + CSS 变量令牌层 |
-| 组件原语 | Ark UI | 5.40.x | 选型对比 `memory/ARCHITECTURE.md` §7.6 |
-| 图标 | Tabler | 3.51.0 | 选型对比 `memory/ARCHITECTURE.md` §7.7 |
-| RAW 解码 | rawler 0.8.0（LGPL-2.1-only） | 上游 dnglab | 可插拔后端（`memory/ARCHITECTURE.md` §6.3） |
-| 渲染 | wgpu + WGSL | 需锁定版本 | RapidRAW 曾降到 29.0 规避 Apple P3 色偏 |
-| DB | SQLite（rusqlite + 迁移框架） | — | `memory/ARCHITECTURE.md` §6.4 |
-| 色彩 | lcms2（预留，后期接入） | — | 第一阶段不做色彩管理 |
-| 类型桥 | specta / tauri-specta | — | Rust 类型 → TS 类型 |
-| Rust 工具链 | **1.99.1**（`rust-toolchain.toml` 锁定） | | 不改全局默认 |
-| TypeScript | 7.0.x（原生编译器，`tsc --noEmit` ≈0.7 s） | — | 7.0 **不带 compiler API**，别引入 `import "typescript"` 的工具 |
+版本表（每层选型 + 版本 + 备注，含 `website/` 是另一套选型的提醒）在 **`.agents/memory/ARCHITECTURE.md` §5**。
+数字的唯一来源是 `package.json`、`Cargo.toml`、`rust-toolchain.toml`；改版本时同步那一处。
 
 ---
 
@@ -195,28 +190,22 @@ raybend/
 ├── README.md / README.zh-CN.md # 对外说明（给用户/访客）
 ├── LICENSE                    # AGPL-3.0 原文（留在根下：GitHub/SPDX 识别）
 ├── THIRD-PARTY-NOTICES.md     # 第三方许可登记（根下）
-├── memory/                    # ★ 记忆库（文件主名全部大写）
-│   ├── PLAN.md                # 近期计划（未完成的部分）
-│   ├── FINISHED.md            # 已完成部分：摘要 + 证据指针 + 历史附录
-│   ├── FUTURE.md              # 远期方向登记册
-│   ├── ARCHITECTURE.md        # 架构与工程基线（分层/版本/架构决定/调研/构建排障）
-│   ├── DESIGN.md              # 视觉与配色体系（唯一事实来源）
-│   ├── REVIEW.md              # 定期评审与方向修正的结论账本
-│   └── FUNCTION-<模块>.md     # 模块功能记忆（BROWSE / IMAGING / REPOSITORY，可按需增加）
-├── specs/                     # 设计规范：具体需求的总结文档（文件名小写，如 m4-w1.md）
-├── design/                    # 设计稿：xxx.pen + 同名 xxx.md 成对
-├── implementations/           # 实施报告：YYYY-MM-DD_<简述>.md（首行精确到秒）
+├── .agents/                   # agent 专用材料（不进产品；入口 `.agents/README.md`）
+├── .agents/memory/            # ★ 记忆库：文件主名全大写（索引见 §10，规则见其 README.md）
+├── .agents/implementations/    # 实施记录：YYYY-MM-DD[_HHMM]_<简述>.md（首行带时间）
+├── .agents/prompts/            # 功能口述原文（.pd，模块功能意图的原始输入）
+├── .agents/uat/                # 验收账本 ledger.jsonl（只由工具 / 页面写）
+├── specs/                     # 计划与规格：PLAN.md（路线 + 未完成项）+ <unit>.md（单工作单元）
+├── design/                    # 设计稿：xxx.ptr（新）/ xxx.pen（兼容）+ 同名 xxx.md 成对
 ├── docs/                      # 给用户/开发者看的信息类文档（指南、手册、发布说明）
 ├── legal/                     # 协议原文与许可数据（第三方许可文本、overrides）
 ├── src/                       # 前端（Solid + Tailwind）
-├── src-tauri/                 # Tauri 外壳（package.name = "raybend-desktop"）
+├── src-tauri/                # Tauri 外壳（package.name = "raybend-desktop"）
 ├── crates/raybend/            # 核心库（不依赖 tauri）
-├── website/                   # 官网（独立技术栈，见 website/AGENTS.md）
-├── prompts/                   # 功能口述原文（.pd，模块功能意图的原始输入）
-└── todos/                     # 临时需求记录（还没开工的复杂需求原文；开工后转 specs/）
+└── website/                   # 官网（独立技术栈，见 website/AGENTS.md）
 ```
 
-**分层原则**：`src-tauri` 只做「窗口 + WebView + 命令转发」薄壳，业务逻辑全部在 `crates/` 内且**不依赖 tauri**（为 Tauri 3 迁移与 CLI/无头模式留路）。前端分层与依赖方向见 `memory/ARCHITECTURE.md` §0–§4。
+**分层原则**：`src-tauri` 只做「窗口 + WebView + 命令转发」薄壳，业务逻辑全部在 `crates/` 内且**不依赖 tauri**（为 Tauri 3 迁移与 CLI/无头模式留路）。前端分层与依赖方向见 `.agents/memory/ARCHITECTURE.md` §0–§4。
 
 ### `website/` 是官网，不是应用本体
 
@@ -229,12 +218,16 @@ GitHub Actions → Pages 发布，**不进** `pnpm release` 流程。细则见 `
 
 ### 5.1 设计纪律（`design/`）
 
-- 命名：`design/<模块>-<视图>.pen` 与同名 `.md` 成对；`.md` 至少含视图用途、区域划分、控件、状态（默认/hover/激活/禁用/空态/加载态）、交互与快捷键、与其它视图的跳转关系。
-- **设计稿在前**：界面实现前出 `.pen`，人类定案后才写代码；实现中要偏离设计，改 `.pen` 之后再改代码。
+- 命名：`design/<模块>-<视图>.ptr`（**新稿**；历史 `.pen` 兼容保留）与同名 `.md` 成对；`.md` 至少含视图用途、区域划分、控件、状态（默认/hover/激活/禁用/空态/加载态）、交互与快捷键、与其它视图的跳转关系。
+- **工具只有 paintress**（2026-11-12 定）：`.ptr` / `.pen` 的读、写、校验、渲染、截图一律走 paintress（MCP 工具或 CLI），
+  **不再使用 Pencil**。它直接读写磁盘、无需打开编辑器、Agent 可自行新建文件；用法与坑见 `.agents/memory/PAINTRESS.md`。
+- **设计稿在前**：界面实现前出设计稿（`.ptr`，或继续维护既有 `.pen`），人类定案后才写代码；实现中要偏离设计，改设计稿之后再改代码。
+- **改稿的固定收尾**：`validate` 通过 + 截图自检 + 实施记录写清帧名与节点 id；截图只是 Agent 自检，不等于人的真机验收。
+- **纯尺寸差异不算偏离**：尺寸令牌以 `src/styles/tokens.css` 为准（`.agents/memory/DESIGN.md` §8.4）。
 
-### 5.2 实施记录纪律（`implementations/`）
+### 5.2 实施记录纪律（`.agents/implementations/`）
 
-- 命名 `implementations/YYYY-MM-DD_<简短描述>.md`；内容开头必须写明确切完成时间（精确到秒）。
+- 命名 `.agents/implementations/YYYY-MM-DD_<简短描述>.md`；内容开头必须写明确切完成时间（精确到秒）。
 - 正文至少含：改动范围、涉及文件、关键决策与理由、遗留问题；验证方式属可选项——跑了什么命令、看到什么结果，或读了哪些代码、得出什么结论，有一样写清楚即可。
 - 一天多次改动写多个文件，不堆叠进同一文件。
 
@@ -258,13 +251,13 @@ pnpm smoke:ui [url]
 # —— Windows 侧（真实产品环境；日常用封装脚本）——
 pnpm debug:win             # build + 跨编译 + check:win + 运行（含 dav1d 环境）
 pnpm check:win             # 产物时间与内容核对（见下）
-pnpm check:diagnostics     # 诊断层真机冒烟（日志/崩溃记录/导出报告，用法见 memory/DEBUGGING.md；需 debug:win 产物）
+pnpm check:diagnostics     # 诊断层真机冒烟（日志/崩溃记录/导出报告，用法见 .agents/memory/DEBUGGING.md；需 debug:win 产物）
 pnpm release [patch|minor|major] --win-msi ...   # 或 --win-nsis（可组合）；打包/publish 由人类执行
 # ❗ release 只在**任务清单里真有发版任务**时才跑（崔总 2026-09-28 定）：
 #    给崔总出测试产物用 pnpm debug:win（快）；release 一次 15 分钟起，还会顶版本号。
 ```
 
-**关键红线**（完整排障手册、十条硬规矩与事故案例在 `memory/ARCHITECTURE.md` §8）：
+**关键红线**（完整排障手册、十条硬规矩与事故案例在 `.agents/memory/ARCHITECTURE.md` §8）：
 
 - **构建 Windows 前必须完成 `pnpm build`，构建完必须 `pnpm check:win`**——`dist/` 是编译期嵌进 exe 的；
   「主程序新、worker 旧」也要防（`-p raybend-desktop -p raybend` 一起建，协议版本握手会报错）。
@@ -299,11 +292,11 @@ pnpm release [patch|minor|major] --win-msi ...   # 或 --win-nsis（可组合）
 
 ### 5.4 规划纪律
 
-- **一次规划只覆盖一个工作单元**（最小颗粒度 = 一个波次）；`memory/PLAN.md` 只做路线级描述，
+- **一次规划只覆盖一个工作单元**（最小颗粒度 = 一个波次）；`specs/PLAN.md` 只做路线级描述，
   具体方案开工前写入 `specs/<milestone>-<单元>.md`；不提前细化未开工单元。
-- 完整规划原则见 `memory/PLAN.md` §0。specs 里的勾选项是**验收清单**：做完即勾、状态如实；
+- 完整规划原则见 `specs/PLAN.md` §0。specs 里的勾选项是**验收清单**：做完即勾、状态如实；
   工作进度的唯一事实来源是 `todo`（全局纪律）。历史文件中对 plannotator 的提及是当时流程的记录，不回改。
-- 目录名沿革：`specs/` 原名 `plans/`（2026-09-26 改名）；`implementations/` 历史记录里的旧写法不改。
+- 目录名沿革：`specs/` 原名 `plans/`（2026-09-26 改名）；`.agents/implementations/` 历史记录里的旧写法不改。
 
 ### 5.5 连续工作范围
 
@@ -314,14 +307,14 @@ pnpm release [patch|minor|major] --win-msi ...   # 或 --win-nsis（可组合）
 - **规划好后必须做到列表任务全部无法进行时再停下**；无法进行的判据：需人类介入（E2E、授权、设计意图缺失等），或同一任务尝试超 5 次仍难解。
 - 此时**不是停止工作**：跳过卡住的部分，继续做清单里其它能做的，直到只剩需要人类协助的部分，再一次性汇总汇报。
 
-### 5.6 评审纪律（`memory/REVIEW.md`）
+### 5.6 评审纪律（`.agents/memory/REVIEW.md`）
 
 `REVIEW.md` 记「每轮 review 的判断、取舍与去向」，只记结论与落点，**规格正文写回拥有它的那份文件**；
 维护规则见该文件 §0。结论归人类拍板，Agent 不得把「待决」自行改成「已采纳」。
 
 ### 5.7 可选工具：真机直连与日志 / 崩溃记录
 
-这两个工具补充代码与需求之外的事实，需要时按 `memory/DEBUGGING.md` 操作：
+这两个工具补充代码与需求之外的事实，需要时按 `.agents/memory/DEBUGGING.md` 操作：
 
 - **真机直连（CDP）**：在正在运行的 Windows 应用里看 DOM、拦 IPC、驱动界面；针对特定难题的深入排查，不是常态。
 - **日志与崩溃记录**：日志的位置与判读、崩溃（panic / 硬崩溃）的辨认、错误报告导出。
@@ -330,32 +323,27 @@ pnpm release [patch|minor|major] --win-msi ...   # 或 --win-nsis（可组合）
 
 ---
 
-## 6. 已确定的架构决定
+## 6. 架构决定（正文：`.agents/memory/ARCHITECTURE.md` §6）
 
-> 本节是**摘要**；完整论证、目录布局、风险与退路在 `memory/ARCHITECTURE.md` §6。
+完整论证（6.1 渲染架构 / 6.2 Tauri 3.0 准备 / 6.3 RAW 解码层 / 6.4 存储架构 / 6.5 缩略图缓存 / 6.6 编辑器会话）在 **`.agents/memory/ARCHITECTURE.md` §6**，本节不再抄一份。
 
-- **6.1 渲染架构 = 原生 wgpu + 透明挖洞（方案 B）**：WebView2 覆盖全窗，照片视口在 webview 中间挖透明洞，Rust/wgpu 绘制其下原生 GPU 底板（Windows 产品默认 **DX12 + DirectComposition visual + Opaque**）。Library/网格用 DOM 虚拟化，Develop 视口用原生 wgpu 直绘。**接口三条红线**：① 视口状态由 Rust 独有，前端只发交互意图；② 覆盖层用 Rust 提供的同一变换矩阵，禁止前端自行推导像素对齐；③ WGSL 与 uniform 属于 Rust crate，前端不接触像素格式与色彩空间。透明链是硬约束：`html`/`body` 必须常驻透明。坐标契约（四种量不得混用、DPR 读运行时值）见 §7.9 与 `docs/native-viewport-coordinate-guide.md`。
-- **6.2 为 Tauri 3.0 迁移做准备**：不引用 `tauri::Wry` 具体类型与 feature flag，窗口句柄包成自己的 `NativeWindowHandle`；资源路径走 Tauri path API。
-- **6.3 RAW 解码层（可插拔）**：首选 rawler 0.8.0，后端可插拔接口在 `raybend` 内，禁止其它模块直接依赖 rawler 类型；**解码必须在独立 worker 进程**执行（崩溃不带崩主进程），对文件做大小/格式预检；第一阶段用内嵌 JPEG 预览做缩略图（快 1–2 个数量级）。
-- **6.4 存储架构 = 全局库 + 每仓 catalog（分层）**：`%LOCALAPPDATA%\com.cthun.raybend\`（app.db、备份、luts、日志）+ 库根（catalog.db 真相源、photos/、recycle/ 回收站、cache/full/ 大图、cache/thumbs.db 小图）。真相源规则：本地编辑以 DB 为准、XMP 只是互操作通道、RAW 永不写回。写并发 = 单写者 actor + 读连接池 + WAL。库身份 = catalog.db 内唯一 ID，app.db 记多路径；路径挂了哪个库靠**读 ID 比对**。禁止 catalog 放云同步/网络盘。完整目录布局与规则见 `memory/ARCHITECTURE.md` §6.4，业务规格见 `memory/FUNCTION-REPOSITORY.md`。
-- **6.5 缩略图 / 预览 / 真身缓存**：两种缩图 + 真身的规格与生成节点见 `memory/FUNCTION-IMAGING.md`（唯一事实源）；**缩图只有 `thumb` 384 与 `preview` 1920 两档**（192 那一档 2026-10-11 取消）。**小图跟着库走**：`<库根>/cache/thumbs.db`（每库一份，只存 384，AVIF q80 / 4:4:4，维护阈值 **2 GiB**）；**1920 载入占位与真身在库根 `cache/full/<资产>/`，仍 AVIF q90**；**来源目录（未入库）的小图一律 JPEG 且只在进程内存**（§2.24）。
-  **基础保障指标**：单库 **15 万张**（RAW+JPG 算一张）下，384 小图缓存 ≤2 GiB 且浏览不因容量抖动；超出按 frecency 淘汰、按需重建。单库达到 15 万张后库设置界面提示建议开新库（不阻断）。
-  **库内大图分两档**（2026-10-11 起，`CacheClass::{Preview,Full}`）：`…-v<pipeline>.avif` = **载入占位**（长边 1920）；`…-full-v<pipeline>.jpg` = **看图真身**（该变体自己的像素，JPEG q92 ~9MB/20MP）。
-  latest 快照名含**栈指纹**（`latest-<profile_hash 前 12 位>-src<源签名>-<base>[-full]-v<pipeline>`）：落库不删整目录，旧文件由 `FullCache::gc_latest` **按档各**保留最新 2 份；容量上限 = **5GB 或可用空间 5% 取小**（`maybe_enforce_capacity`，写后有限流），超限时删除次序为真身档在前、同档最旧在前。
-  **失效要连真身档一起**（`invalidate_source` 不限扩展名；`invalidate` 按 `latest-` 前缀、`remove_issue` 按 `issue-<id>-` 前缀，两档都命中）。红线：删掉整个缓存目录后功能降级但可从原图重建；`app.db` / `catalog.db` / LUT 本体不是可删缓存。回收站清空/真删时连带清理该资产的 `cache/full/<id>/`。
+每次会话会用到、不能现场翻的只有两条：
+
+- **原生视口三条红线**（§6.1）：视口状态由 Rust 独有、前端只发交互意图；覆盖层用 Rust 给的同一变换矩阵；WGSL 与 uniform 属 Rust crate。坐标系另见 §7.9。
+- **解码在独立 worker 进程**（§6.3）：崩溃不带崩主进程，进解码前做大小/格式预检。
 
 ---
 
 ## 7. 调研挖出的关键真相
 
-> 完整调研记录在 `memory/ARCHITECTURE.md` §7；这里只留一句话结论 + §7.9 坐标契约摘要。
+> 完整调研记录在 `.agents/memory/ARCHITECTURE.md` §7；这里只留一句话结论 + §7.9 坐标契约摘要。
 
 - **7.1 SQLite**：够用（行业先例 Lightroom/darktable/digiKam），真风险在写并发——用单写者 actor 解决。
 - **7.2 中文搜索**：FTS5 必须 `tokenize='trigram'`（unicode61 对中文无效）。
 - **7.3 文件身份**：不用路径做主键（Windows `FileIdInfo`）；路径 NFC 存储 + 原始名 + 大小写折叠列。
 - **7.4 嵌入式预览**：读内嵌 JPEG 比完整解码快 1–2 个数量级。
 - **7.5 参考实现 RapidRAW**（https://github.com/CyberTimon/RapidRAW ）：Tauri 图像软件的实证（wgpu 直绘 20fps→120fps）；AGPL-3.0 与本项目兼容，找不到方案时参考它（注意其 rawler 是 LGPL fork）。
-- **7.6 / 7.7 已决选型**：Ark UI（splitter/tree-view 只有它提供）+ Tabler 图标（描边/填充成对、MIT、6 千余枚）；实测数据见 `memory/FINISHED.md` 附录 A.10 与 `memory/ARCHITECTURE.md` §7.6/§7.7。
+- **7.6 / 7.7 已决选型**：Ark UI（splitter/tree-view 只有它提供）+ Tabler 图标（描边/填充成对、MIT、6 千余枚）；实测数据见 `.agents/memory/FINISHED.md` 附录 A.10 与 `.agents/memory/ARCHITECTURE.md` §7.6/§7.7。
 - **7.8 Tauri 分发**：桌面应用不发 npm；签名与更新通道属发布里程碑（R3-01 已拍板 unsigned 直下）。
 
 ### 7.9 原生视口的坐标契约（2026-09-19 真机血泪；完整报告 `docs/native-viewport-coordinate-guide.md`）
@@ -371,52 +359,43 @@ pnpm release [patch|minor|major] --win-msi ...   # 或 --win-nsis（可组合）
 
 铁律：**前端只上报原始事实**（rect、clientX/Y、DPR），物理换算全在 Rust；**DPR 必须读运行时值**
 （本机 125% × 文字 110% = 1.375，写死必错）；别用 `screenX/Y × dpr` 猜容器偏移。
-诊断红旗与验证顺序见 `memory/ARCHITECTURE.md` §7.9。
-
----
-
-## 8. 必须处理的问题清单
-
-已迁至 `memory/PLAN.md` §5（按优先级、含 2026-09-27 状态核对）。
-
-## 9. 初始化状态
-
-项目初始化已完成（M0，2026-09-15，由人类执行）；记录见 `memory/FINISHED.md`。
+诊断红旗与验证顺序见 `.agents/memory/ARCHITECTURE.md` §7.9。
 
 ---
 
 ## 10. 文档索引与记忆体规范
 
-**根下只放三份**：`README.md`（对外）、`AGENTS.md`（本文件）、`THIRD-PARTY-NOTICES.md`（许可登记）、`LICENSE`（协议原文，留给工具链识别）。
+**根下只放四份**：`README.md`（对外）、`AGENTS.md`（本文件）、`THIRD-PARTY-NOTICES.md`（许可登记）、`LICENSE`（协议原文，留给工具链识别）。
 
-**记忆体规范**：agent 记忆存 `memory/`，**文件主名全部大写**；与具体模块功能相关的记忆一律
-`memory/FUNCTION-<模块>.md`（现有 BROWSE / IMAGING / REPOSITORY，新模块照此增加）。
-本表以外的目录/文件不属于记忆体（如 `prompts/` 是口述原文输入，`legal/` 是协议存放处，`todos/` 是**临时需求记录**）。
+**位置与职责**（详规 `.agents/memory/README.md`）：`specs/PLAN.md` = 要做什么（路线 + 未完成项）；`specs/<unit>.md` = 一份工作单元的规格；`.agents/memory/` = 已知 / 已定 / 为什么（主名全大写，模块功能一律 `FUNCTION-<模块>.md`，现有 BROWSE / IMAGING / REPOSITORY）；`.agents/implementations/` = 一次改动一条记录；`.agents/prompts/` = 口述原文。`legal/` 是协议存放处，`.agents/uat/` 是验收账本（**只由工具 / 页面写**）。
 
-**`todos/` 约定（崔总 2026-09-28 定）**：复杂需求在对话里接到、还没开工的，除了登记进
-pi 的 todo 工具，**同时把需求原文落一份到 `todos/`**（文件名 `YYYY-MM-DD-<简述>.md`，
-内含原文、背景、落点提示与验收要点）—— 防「todo 工具里的描述丢细节」。开工时以它为源
-写 `specs/`，做完删除或移走；它是需求暂存，不是进度表（进度只看 todo 工具），也不是 spec。
+**需求入口**：新需求先写 `specs/<unit>.md`（正文引用崔总原话）。**`todos/` 已退役**（2026-11-15）：原 7 份需求逐字并入各自规格，去向见 `.agents/framework/reports/coverage-2026-11-15T04-21-15-08-00.md`。
 
 | 文件 / 目录 | 内容 |
 | --- | --- |
 | `AGENTS.md` | 本文件：定位、硬约束、目录、纪律核心、术语、索引 |
-| `memory/PLAN.md` | 近期计划（未完成排期）、问题清单、决策记录 |
-| `memory/FINISHED.md` | 已完成部分摘要 + 证据指针 + 历史路线附录 |
-| `memory/FUTURE.md` | 远期方向登记册（框架迁移、RAW 后端、渲染演进、AI、平台扩展） |
-| `memory/ARCHITECTURE.md` | 架构与工程基线：前端分层、版本基线、架构决定、调研存档、构建排障、untrack 纪律 |
-| `memory/DEBUGGING.md` | 排查工具（可选）：真机直连（CDP）与日志 / 崩溃记录的操作与排障 |
-| `memory/LIMITS.md` | **硬性上限登记册**：业务上限 / 容量预算 / 技术性上限的唯一索引（§2.28） |
-| `memory/COMPONENTS.md` | **组件库方案**：复用五步流程、分层、原语/范式件/成套件的用法与扩展方式、图标纪律、已合并的重复实现（§12 的完整版） |
-| `memory/DESIGN.md` | 视觉与配色体系（唯一事实来源） |
-| `memory/REVIEW.md` | 定期评审与方向修正（结论账本，维护规则见其 §0） |
-| `memory/FUNCTION-BROWSE.md` | 浏览模式规格：三列结构、toolsbar、选择逻辑、看图/对比、胶片带、标签、浮层、术语细则 |
-| `memory/FUNCTION-IMAGING.md` | 图像格式与显示规格（唯一事实源）：格式范围 + 三种图规格 + issue/latest 切换语义 |
-| `memory/FUNCTION-REPOSITORY.md` | 库与导入规格：库身份、导入模版、序号、重名、RAW 分流、目录透传 |
-| `memory/EDIT-GPU.md` | 编辑计算 GPU 化账本：哪一段在 GPU / 还在 CPU、掉出快速路的判据、下一步该搬谁 |
+| `specs/PLAN.md` | 路线总览、待人类事项、未开工单元、问题清单（只放未完成；决策记录在 ARCHITECTURE §11） |
+| `specs/<unit>.md` | 单工作单元规格（`<milestone>-<单元>.md`，文件名小写）：开工前写、结项时更新状态行 |
+| `.agents/README.md` | `.agents/` 导航层：四个子目录各管什么 |
+| `.agents/memory/README.md` | **记忆契约**：位置、写规则、预算、压缩配方、审计代码 |
+| `.agents/memory/FINISHED.md` | 已完成部分摘要 + 证据指针 + 历史路线附录 |
+| `.agents/memory/FUTURE.md` | 远期方向登记册（框架迁移、RAW 后端、渲染演进、AI、平台扩展） |
+| `.agents/memory/ARCHITECTURE.md` | 架构与工程基线：前端分层、版本基线（§5）、架构决定（§6）、调研存档、构建排障、untrack 纪律、决策记录（§11） |
+| `.agents/memory/DEBUGGING.md` | 排查工具（可选）：真机直连（CDP）与日志 / 崩溃记录的操作与排障 |
+| `.agents/memory/LIMITS.md` | **硬性上限登记册**：业务上限 / 容量预算 / 技术性上限的唯一索引（§2.28） |
+| `.agents/memory/COMPONENTS.md` | **组件库方案**：复用五步流程、分层、原语/范式件/成套件的用法与扩展方式、图标纪律、已合并的重复实现（§12 的完整版） |
+| `.agents/memory/DESIGN.md` | 视觉与配色体系（唯一事实来源） |
+| `.agents/memory/PAINTRESS.md` | **设计稿工具操作手册**：paintress 的工具/CLI 对照、节点 schema、截图自检、人机短号、纪律与坑 |
+| `.agents/memory/REVIEW.md` | 定期评审与方向修正（结论账本，维护规则见其 §0） |
+| `.agents/memory/FUNCTION-BROWSE.md` | 浏览模式规格：三列结构、toolsbar、选择逻辑、看图/对比、胶片带、标签、浮层、术语细则 |
+| `.agents/memory/FUNCTION-IMAGING.md` | 图像格式与显示规格（唯一事实源）：格式范围 + 三种图规格 + issue/latest 切换语义 |
+| `.agents/memory/FUNCTION-REPOSITORY.md` | 库与导入规格：库身份、导入模版、序号、重名、RAW 分流、目录透传 |
+| `.agents/memory/EDIT-GPU.md` | 编辑计算 GPU 化账本：哪一段在 GPU / 还在 CPU、掉出快速路的判据、下一步该搬谁 |
 | `specs/` | 单工作单元的详细方案与需求规格（`<milestone>-<单元>.md`，文件名小写） |
-| `design/*.pen` + `.md` | Pencil 设计稿与说明（成对） |
-| `implementations/*.md` | 实施记录（文件名带日期，内容首行带精确时间） |
+| `design/*.ptr`（新）/ `*.pen`（兼容）+ `.md` | 设计稿（paintress 读写）与说明（成对） |
+| `.agents/implementations/*.md` | 实施记录（文件名带日期，内容首行带时间；新增走 `record_change`） |
+| `.agents/prompts/*.pd` | 功能口述原文（口述输入，不成文的不入记忆） |
+| `.agents/uat/ledger.jsonl` | 验收账本（追加写、进 git；**不要手改**） |
 | `docs/` | 给人看的信息文档（用户指南、隐私、发布手册、坐标契约报告等） |
 | `legal/` | 协议原文与许可数据（说明见 `legal/README.md`） |
 | `website/AGENTS.md` | 官网专属指南（独立技术栈） |
@@ -428,8 +407,8 @@ pi 的 todo 工具，**同时把需求原文落一份到 `todos/`**（文件名 
 
 ## 11. 术语约定（词汇表）
 
-> 代码、设计稿、文档、提交信息一律用本表叫法；详细视觉规则见 `memory/DESIGN.md`，
-> 界面结构细则见 `memory/FUNCTION-BROWSE.md`。
+> 代码、设计稿、文档、提交信息一律用本表叫法；详细视觉规则见 `.agents/memory/DESIGN.md`，
+> 界面结构细则见 `.agents/memory/FUNCTION-BROWSE.md`。
 
 ### 11.1 界面区域
 
@@ -448,7 +427,7 @@ pi 的 todo 工具，**同时把需求原文落一份到 `todos/`**（文件名 
 left / right 叠在 mid 之上各自贴边（分别装 workspace 左列 / 右列相关的**面板开关**），
 不参与 mid 宽度计算；挤压时 left/right 不透明底遮住 mid、内侧 20px 渐隐；无内容整行隐藏。
 一组互斥开关：按一个关其它，再按同一个整组关掉；任何档位都允许鼠标开回来。
-细则与画稿见 `memory/FUNCTION-BROWSE.md` §13.1 与 `design/editor.md`。
+细则与画稿见 `.agents/memory/FUNCTION-BROWSE.md` §13.1 与 `design/editor.md`。
 
 **statusbar 命名规则**：说 `statusbar` 必须带当前 mid 内容前缀（`tiles statusbar` / `view statusbar` /
 `film statusbar`）——它**跟 mid 组件走，不跟 flow 走**；同一套 tiles 在 import / browse 都叫
@@ -456,7 +435,7 @@ left / right 叠在 mid 之上各自贴边（分别装 workspace 左列 / 右列
 
 **workspace 结构红线**（人类 2026-09-20，不可违反）：workspace 下**只有纵向分列，没有跨列行**，
 每条列自己到底；一切「底部信息条」住在它所属的那一列里。
-（三处同源记述：本节 + `memory/DESIGN.md` §8.7 + `memory/FUNCTION-BROWSE.md` §5.8。）
+（三处同源记述：本节 + `.agents/memory/DESIGN.md` §8.7 + `.agents/memory/FUNCTION-BROWSE.md` §5.8。）
 
 ### 11.2 勾选（check）vs 选中（select）——必须分清
 
@@ -466,7 +445,7 @@ left / right 叠在 mid 之上各自贴边（分别装 workspace 左列 / 右列
 | **选中** | 「当前正在看/正在操作的对象」 | 整行/整片主色底 | **同一时间全局只有一个** |
 
 两者互相独立；勾选要显式点圈，选中是「点行本身」的结果；跨面板的选中状态是同一个状态，必须同步。
-❗ 不要因为某目录被选中而强制展开树（`memory/DESIGN.md` §12.4.1）。
+❗ 不要因为某目录被选中而强制展开树（`.agents/memory/DESIGN.md` §12.4.1）。
 
 ### 11.3 移除 / 排除 / 删除 / 还原（四者不同，统一用禁行图标，不用叉号）
 
@@ -496,37 +475,37 @@ workspace 中列组件：
 位置组合：`import left` / `browse mid` / `export right`（位置级）；更常说 `browse tiles` / `browse view` / `browse film`。
 这套词只描述位置与职责，不指定实现文件。
 
-**结构红线**（详见 `memory/FUNCTION-BROWSE.md` §5.1/§5.8/§13.2）：
+**结构红线**（详见 `.agents/memory/FUNCTION-BROWSE.md` §5.1/§5.8/§13.2）：
 import 与 browse 的照片区必须经同一个 `PhotoViewingStage` / `PhotoViewingController`；
 `PhotoGrid` 进 view / film / compare **只能隐藏，不能卸载**；胶片带选择只调 `TilesSource.select / setAnchor`；
 胶片带尺寸组件只有一份、偏好按工作流分开持久化；`TilesControlBar` 只能由 `TilesShell` 装配
-（受控滑杆不得重建它的 DOM——untrack 纪律见 §2.17 / `memory/ARCHITECTURE.md` §9）。
+（受控滑杆不得重建它的 DOM——untrack 纪律见 §2.17 / `.agents/memory/ARCHITECTURE.md` §9）。
 
 ### 11.5 其他常用术语
 
 | 术语 | 含义 |
 | --- | --- |
 | **库**（repository） | 用户选择的相片仓根目录；**没有库就无法导入** |
-| **资产**（asset） | 一张照片 = 一条记录 + 它的**文件组**：位图 + 同名的 `_RAW/` 下 RAW + `.xmp` 侧车。库里一律按资产说话（评级/标签/编辑栈都挂在资产上）。规格 `memory/FUNCTION-REPOSITORY.md` |
+| **资产**（asset） | 一张照片 = 一条记录 + 它的**文件组**：位图 + 同名的 `_RAW/` 下 RAW + `.xmp` 侧车。库里一律按资产说话（评级/标签/编辑栈都挂在资产上）。规格 `.agents/memory/FUNCTION-REPOSITORY.md` |
 | **`_RAW/`** | 库内的**保留目录**：同名的相机原片放在位图旁边的 `_RAW/` 里。它不是“另一个目录”，不进目录树、不算范围、对侧车折算回上级目录（`store::assets` 的折算规则是唯一实现） |
 | **来源**（source） | 待导入的目录（磁盘 / NAS / 云） |
-| **缩略图两档** | `thumb`（缩略图，最长边 **384** —— 网格 tiles 与**所有**胶片带、定稿卡片共用，**AVIF q80**）/ `preview`（1920 AVIF q90 4:4:4）。~~`film` 192~~ 2026-10-11 取消（`specs/thumbnail-tiers-and-import-memory.md`）。规格与生成节点见 `memory/FUNCTION-IMAGING.md`（唯一事实源）；**缓存跟着库走**：`<库根>/cache/thumbs.db`（384）与 `cache/full/`（1920/真身），见 §6.5。**来源目录（import）的图是 JPEG 且只在进程内存里**（§2.24） |
-| **`latest`** | 当前编辑栈的输出（还没定稿）；与 `issue` 并列的两种「看图用的东西」，切换语义见 `memory/FUNCTION-IMAGING.md` |
+| **缩略图两档** | `thumb`（缩略图，最长边 **384** —— 网格 tiles 与**所有**胶片带、定稿卡片共用，**AVIF q80**）/ `preview`（1920 AVIF q90 4:4:4）。~~`film` 192~~ 2026-10-11 取消（`specs/thumbnail-tiers-and-import-memory.md`）。规格与生成节点见 `.agents/memory/FUNCTION-IMAGING.md`（唯一事实源）；**缓存跟着库走**：`<库根>/cache/thumbs.db`（384）与 `cache/full/`（1920/真身），见 `.agents/memory/ARCHITECTURE.md` §6.5。**来源目录（import）的图是 JPEG 且只在进程内存里**（§2.24） |
+| **`latest`** | 当前编辑栈的输出（还没定稿）；与 `issue` 并列的两种「看图用的东西」，切换语义见 `.agents/memory/FUNCTION-IMAGING.md` |
 | **最近**（Recent） | 自动记录的最近 50 个导入目录 |
 | **已选目录** | 已勾选、准备导入的目录集合（横条列表） |
-| **`shortpath`** | 路径缩写：盘符 + 中间各级首字母 + 末级全名（`memory/DESIGN.md` §12.3） |
-| **`flowhint`**（提示区）= flowbar 的 `hint` 段 | **设置按钮右边、`info` 左边**那条弹性带子：一句功能提示（如「按住 Ctrl 键可拖动」），**辅色**文字、超出右缘渐隐、离 info 留 100px。状态在 `lib/flow-hint.ts`（含**开关**：默认开，设置页关掉后 `showFlowHint` 直接丢弃 —— 调用点不判断设置），用法见 `memory/COMPONENTS.md` §3.2 |
+| **`shortpath`** | 路径缩写：盘符 + 中间各级首字母 + 末级全名（`.agents/memory/DESIGN.md` §12.3） |
+| **`flowhint`**（提示区）= flowbar 的 `hint` 段 | **设置按钮右边、`info` 左边**那条弹性带子：一句功能提示（如「按住 Ctrl 键可拖动」），**辅色**文字、超出右缘渐隐、离 info 留 100px。状态在 `lib/flow-hint.ts`（含**开关**：默认开，设置页关掉后 `showFlowHint` 直接丢弃 —— 调用点不判断设置），用法见 `.agents/memory/COMPONENTS.md` §3.2 |
 | **`flowinfo`** | flowbar 右侧图片信息区；**跟随当前工作流**，没选中就清空 |
 | **`easy copy`** | 指向信息组 → 细边框 +「点击复制」气泡；点击后变「已复制」 |
 | **`easy destroy`** | 移除类快速通道：默认弹确认，`Shift` 跳过 |
-| **反转**（inversion） | 单击 ↔ `Ctrl`+单击可对调的**固有能力**（开关挂在数据源上，按工作流/面适配）；判定唯一处 `lib/selection.ts::clickMode`。口径 `memory/FUNCTION-BROWSE.md` §5.2.4 |
+| **反转**（inversion） | 单击 ↔ `Ctrl`+单击可对调的**固有能力**（开关挂在数据源上，按工作流/面适配）；判定唯一处 `lib/selection.ts::clickMode`。口径 `.agents/memory/FUNCTION-BROWSE.md` §5.2.4 |
 | **回退**（fallback） | `Shift`+`Ctrl`+单击**不是操作**（设定上不存在）；该组合被捕获并回退到当前场景的单击（标准=replace，反转=toggle）。**没有自己的语义，不要为它设计行为** |
-| **`issue`（定稿）** | 一张图的一个非破坏性定稿版本，可多个、各有独立预览；`SOOC` 是写死的特殊 issue（相机直出 JPG）。见 `memory/FUNCTION-IMAGING.md` 与 `specs/issue-xmp-contract.md` |
+| **`issue`（定稿）** | 一张图的一个非破坏性定稿版本，可多个、各有独立预览；`SOOC` 是写死的特殊 issue（相机直出 JPG）。见 `.agents/memory/FUNCTION-IMAGING.md` 与 `specs/issue-xmp-contract.md` |
 | **取消 / 确认按钮顺序** | 全系统统一：**取消在左，确认（往前进类）在右** |
 | **中性面**（neutral surface） | 四级灰面：`surface-track` < `surface-main` < `surface-bar` < `surface-layer` |
 | **主色底 / 辅色底** | 全局反馈：**指向=辅色底，点击后=主色底** |
 | **紧凑 / 宽松** | 全局两档密度；只影响间距，不影响字号与图标大小 |
-| **按时间分组 / 时间片** | 同一拍摄日内相邻间隔 > 1 小时断为新片（`memory/DESIGN.md` §12.7） |
+| **按时间分组 / 时间片** | 同一拍摄日内相邻间隔 > 1 小时断为新片（`.agents/memory/DESIGN.md` §12.7） |
 | **内嵌预览**（embedded preview） | 相机写在 RAW 里的 JPEG 预览，提取快 1–2 个数量级 |
 | **编辑栈**（develop stack） | 全部非破坏性编辑操作的序列；定稿落成 issue |
 | **`fullscreen`** | 无 UI 沉浸式单图浏览（独立无边框窗口，`F11`）；与主窗口看图态是两回事 |
@@ -534,7 +513,7 @@ import 与 browse 的照片区必须经同一个 `PhotoViewingStage` / `PhotoVie
 | **窗口还原**（window restore） | 启动时恢复上次关闭的四角点位：`src-tauri/src/window_state.rs` + `windows-state.json`；启动只判断一次，三种操作（还原 / Shift+最大化回退 / 最大化），不循环；最小化关闭清记录，最大化关闭该屏最大化。规格 `specs/window-restore.md` |
 | **`shortcut`（快捷键）** | 命令注册表里的默认键位（`CommandSpec.defaultKey`）；新功能必选项（§2.15） |
 | **场景（scene）** | 命令体系的一层（崔总 2026-10-09 定）：**入口唯一，逻辑按场景转换** —— 撤销/重做对用户是一套操作，在浏览与编辑背后是两套内部逻辑。落地见 `CommandDeps.history` 与 `App.tsx` 的 `historyScene()`；`scope` 只管静态归属与冲突检测 |
-| **弱菜单** | 菜单是**逃生通道**不是功能索引：界面里已有入口的动作/开关不进菜单（仍留在命令面板与快捷键里）。见 `CommandSpec.menu` 注释与 `implementations/2026-10-09_menu-weak-menu-cleanup.md` |
+| **弱菜单** | 菜单是**逃生通道**不是功能索引：界面里已有入口的动作/开关不进菜单（仍留在命令面板与快捷键里）。见 `CommandSpec.menu` 注释与 `.agents/implementations/2026-10-09_menu-weak-menu-cleanup.md` |
 | **动态反差**（Dynamic Contrast） | 一根拉杆的局部色调映射（`dynamicContrast`，0–100 单极）；与全局 `contrast` 不是一回事 |
 | **显示尺寸**（display size） | 「这张照片**现在显示多大**」的唯一口径：与方向一样**记在库**里（每文件 `asset_files.display_*`、latest `develop_stacks.output_*`、每条定稿 `issues.output_*`），按**显示变体**解析（`store::sizes::display_size` / 前端 `lib/display-size.ts`）。view 按该尺寸布局，flow info 与 tiles 比例也读它；规格 `specs/display-size-source.md` |
 | **展示尺寸 / 输出尺寸** | 展示尺寸 = `oriented_size(原始轴, 方向)`（屏上宽×高）；输出尺寸 = `EditGeometry::output_size(源展示尺寸)`（已含裁切/旋转，latest 与定稿用） |
@@ -553,11 +532,11 @@ import 与 browse 的照片区必须经同一个 `PhotoViewingStage` / `PhotoVie
 > **纪律（崔总 2026-10-11 定）**：写界面前在下面这份清单里找 —— 找到就**用它**（不够就改它、一般化它），
 > **不要再写第二个**（§2.12）；清单里确实没有才新建，并且**同一次改动里补进这份表**。
 >
-> ❗**完整方案在 `memory/COMPONENTS.md`（先读那份）**：本表只是索引（谁在哪、管什么），
+> ❗**完整方案在 `.agents/memory/COMPONENTS.md`（先读那份）**：本表只是索引（谁在哪、管什么），
 > 那份写的是**怎么用 / 怎么扩展 / 哪些重复实现已经合并、禁止写回来**（五步复用流程、
 > 图标纪律、新建组件检查表、已合并案例）。两处一起维护：新建组件 → 两份都补。
 >
-> **视觉规格**（状态、密度、主题、尺寸令牌）在 `memory/DESIGN.md` §10.1，
+> **视觉规格**（状态、密度、主题、尺寸令牌）在 `.agents/memory/DESIGN.md` §10.1，
 > 画稿在 `design/*.pen` + 同名 `.md`。想「看一眼」全部组件：dev 下开 `/dev/kitchen-sink`（`src/dev/KitchenSink.tsx` 画廊）。
 >
 > 分层规则（`lint:arch` 强制）：`components/ui/` **不许 import `features/` 或 `api/`**（取图、文案这类外部事实由调用方传入）；
@@ -578,7 +557,7 @@ import 与 browse 的照片区必须经同一个 `PhotoViewingStage` / `PhotoVie
 | `Dialog` / `ConfirmDialog` / `DialogFrame` | `Dialog.tsx` | 模态弹窗（建库、`easy destroy` 确认）；**取消在左、确认在右**。`DialogFrame` 是唯一 Ark 三件套（Root/Backdrop/Positioner/Content）实现，命令面板也复用它；遮罩由弹窗栈自动只画最底层，弹窗面固定 0.5px `--dialog-ring` 内描边 |
 | `ToggleBlock` | `ToggleBlock.tsx` | 可按下按钮（吸附、按时间这类模式开关） |
 | `Badge` / `CountBadge` | `Badge.tsx` | 计数 / 状态小标签 |
-| `PathText` | `PathText.tsx` | `shortpath` 路径缩写（§11.5、`memory/DESIGN.md` §12.3） |
+| `PathText` | `PathText.tsx` | `shortpath` 路径缩写（§11.5、`.agents/memory/DESIGN.md` §12.3） |
 | `TreeNode` | `TreeNode.tsx` | 树形行（展开箭头 + 图标 + 名称 + 勾选框）；目录树用它 |
 | `Panel` | `Panel.tsx` | 面板容器（标题行、可折叠，可进 `SplitStack` 参与拖拽分段） |
 | `SplitHandle` / `SplitHandleDots` / `SplitStack` | `SplitHandle.tsx` / `SplitStack.tsx` | **全项目唯一**的拖拽分隔条（`...` 三点）与 N 段可拖布局；尺寸数学在 `lib/stack-resize.ts`（有单测） |
@@ -636,7 +615,7 @@ import 与 browse 的照片区必须经同一个 `PhotoViewingStage` / `PhotoVie
 | --- | --- | --- | --- |
 | 导入 | `crates/raybend/src/import/`、`src-tauri/src/import.rs`、`src/features/import/` | `catalog.assets/asset_files`、缩略图缓存、XMP 读回 | 判重/冲突、`_RAW/` 规则、XMP 采纳、导入模板、缩略图两档 |
 | 浏览 / 评级 / 标签 / 桶 | `store/{assets,tags,photo_tags,organization}.rs`、`src-tauri/{browse,organization}.rs`、`src/features/browse/` | `catalog` 标记、`app.db` 桶/成员/词典 | XMP 元数据层、撤销/重做、命令注册（§2.15）、i18n、筛选查询 |
-| **右栏元数据字段 / 地理**（2026-11-03） | `src/features/browse/{BrowsePanels,text-edit,store}.ts`、`crates/raybend/src/{geo.rs,store/{query,marking}.rs}`、`assets/geo/` | 文字字段（作者/描述/地点）与 GPS 展示；建议输入（最近 20 ∪ 库内值）；「按 GPS 填入地点」 | 新增/改字段 → `marking::TextField` 三处同步（枚举/SQL 列/TS 联合）→ `memory/LIMITS.md`；城市数据重建 → `scripts/build-geo-data.mjs` + CC BY 署名 + `THIRD-PARTY-NOTICES.md`；XMP 侧车地点写出见 `specs/xmp-sidecar.md` §5.1 |
+| **右栏元数据字段 / 地理**（2026-11-03） | `src/features/browse/{BrowsePanels,text-edit,store}.ts`、`crates/raybend/src/{geo.rs,store/{query,marking}.rs}`、`assets/geo/` | 文字字段（作者/描述/地点）与 GPS 展示；建议输入（最近 20 ∪ 库内值）；「按 GPS 填入地点」 | 新增/改字段 → `marking::TextField` 三处同步（枚举/SQL 列/TS 联合）→ `.agents/memory/LIMITS.md`；城市数据重建 → `scripts/build-geo-data.mjs` + CC BY 署名 + `THIRD-PARTY-NOTICES.md`；XMP 侧车地点写出见 `specs/xmp-sidecar.md` §5.1 |
 | **编辑（无损参数）** | `develop/params.rs` + `assets/develop-params.json`、`develop/pipeline.rs`、`store/develop.rs`、`store/issues.rs`、`src/features/editor/` | 编辑栈 `DevelopStack`、`latest` / issue 快照、preset | **XMP（见 §13.1）**、profile schema 版本、preset 兼容、撤销节点（§2.21）、渲染缓存签名 |
 | 导出 | `export/`、`src-tauri/src/export.rs`、`src/features/export/` | 输出文件、元数据、ICC | issue/尺寸契约、外部编辑器 TIFF、队列 |
 | 色彩 | `color/`、`display/`、`src-tauri/src/color_profiles.rs` | 输入/工作/输出 ICC、显示状态 | 缓存代理、XMP 色彩身份、导出标记 |
@@ -658,7 +637,7 @@ import 与 browse 的照片区必须经同一个 `PhotoViewingStage` / `PhotoVie
    `every_develop_param_is_classified_for_crs` 会遍历 `PARAMS`，漏归类直接红。
 5. **rb 域**：`rb:profileJson` 存完整 `DevelopStack`，新参数**自动**跟着走；只要上面的结构没变，不需要改 `packet.rs`。
 6. **preset / 旧数据**：预设交换与旧 profile 读取是否仍成立；需要时补兼容测试。
-7. **文档**：`specs/xmp-sidecar.md` §5.1 的映射表、`specs/issue-xmp-contract.md`（若 rb 形状变了）、`memory/FUNCTION-IMAGING.md`（若影响显示）。
+7. **文档**：`specs/xmp-sidecar.md` §5.1 的映射表、`specs/issue-xmp-contract.md`（若 rb 形状变了）、`.agents/memory/FUNCTION-IMAGING.md`（若影响显示）。
 8. **测试门**：`pnpm test:rust -p raybend xmp`、`pnpm test:rust`、`pnpm typecheck && pnpm test`。
 
 > 判据：**新参数只要进了 `PARAMS`，XMP 侧就不可能被忘掉** —— 要么映射，要么显式声明不映射，测试会拦住。
@@ -668,5 +647,27 @@ import 与 browse 的照片区必须经同一个 `PhotoViewingStage` / `PhotoVie
 - **数据库 schema**：只走 `store/migration.rs` + `store/migrations/*.sql`（§2.16），不临时 `ALTER`。
 - **用户可触发动作**：登记 `features/commands/catalog.ts` + 默认键或留空理由（§2.15）。
 - **写 sidecar 的数据**（编辑栈 / issue / 评级 / 色标 / 标签 / 文字 / 地点 / 目录命名）：同一次改动里核 XMP（§2.19）。
-- **缓存口径**：小图两档 / 真身 / 库外内存（§2.24/§6.5）；**新签名必须带 `-v<PIPELINE_VERSION>` 片段**，
+- **缓存口径**：小图两档 / 真身 / 库外内存（§2.24 与 `.agents/memory/ARCHITECTURE.md` §6.5）；**新签名必须带 `-v<PIPELINE_VERSION>` 片段**，
   否则自动维护（`thumbnail/cache.rs::drop_other_pipeline_versions`）既不会收它、也无法判断新旧。
+
+<!-- ask-init:begin workflow v1 -->
+## Ask workflow
+
+This project uses the `@andares/pi-toolkits` ask workflow. The steps run in this order:
+
+| step | entry | what it does |
+| --- | --- | --- |
+| discuss | `/ask` | read-only consult; `scratchpad` is the only write channel |
+| plan | `/ask-plan <topic>` | research, ask questions, write `specs/<slug>.md`, review it block by block in the browser, implement only after approval |
+| record | `record_change` | after the work: write the change record and one user-visible behaviour sentence |
+| review | `/ask-review` | optional third-party model cross-check (check + fix); it leaves no state behind |
+| accept | `/ask-uat` | cluster pending change records into acceptance items, verify them on the page, tick them off |
+
+Rules that are easy to break:
+
+- Change records live in `.agents/implementations/`; new ones carry the minute in the name (`YYYY-MM-DD_HHMM_slug.md`) and repeat it in the first line (`# YYYY-MM-DDTHH:MM±HH:MM — title`).
+- The acceptance ledger is `.agents/uat/ledger.jsonl`, append-only, committed to git, and belongs to the main checkout. Never edit it by hand: the tools and the page write it.
+- Acceptance items are created by clustering on the UAT side, never by an implementation session.
+- Plans go in `specs/`, memory in `.agents/memory/`, evidence in `.agents/implementations/`.
+
+<!-- ask-init:end workflow -->

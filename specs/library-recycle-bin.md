@@ -1,8 +1,8 @@
 # 库级回收站（Library Recycle Bin）— 工作单元规格
 
 **状态**：已定案待实施（崔总 2026-10-10 两轮讨论 + 决策答复；设计稿确认后开工）。
-**关联**：`memory/FUTURE.md` #10（应用内回收站，本单元结项）；`AGENTS.md` §11.3（删除语义，本单元修订）；
-`memory/FUNCTION-REPOSITORY.md` §1（库结构，本单元修订）；`memory/FUNCTION-BROWSE.md` §3.2/§4.3/§5.9；
+**关联**：`.agents/memory/FUTURE.md` #10（应用内回收站，本单元结项）；`AGENTS.md` §11.3（删除语义，本单元修订）；
+`.agents/memory/FUNCTION-REPOSITORY.md` §1（库结构，本单元修订）；`.agents/memory/FUNCTION-BROWSE.md` §3.2/§4.3/§5.9；
 `specs/xmp-sidecar.md`（增补「库内移动」）；`specs/command-scenes.md`（快捷键场景化，并行单元）；
 `crates/raybend/src/store/delete.rs`（现有删除实现，本单元改造）。
 
@@ -262,10 +262,10 @@ Rust 侧只允许一个可见性判定入口（新增 `store::query::Visibility:
 ## 9. 文档同步清单
 
 - `AGENTS.md`：§2.3/§11.3（删除定义与表格）、§6.4/§6.5（库结构与缓存清理口径）
-- `memory/FUNCTION-REPOSITORY.md` §1（`recycle/` 保留目录）
-- `memory/FUNCTION-BROWSE.md` §3.2（toolsbar）、§4.3（目录树 + 回收站入口）、§5.9（删除流程）
-- `memory/DESIGN.md` §12.11 #4（删除确认口径——按钮/键仍确认、拖动不确认）
-- `memory/FUTURE.md` #10（结项）
+- `.agents/memory/FUNCTION-REPOSITORY.md` §1（`recycle/` 保留目录）
+- `.agents/memory/FUNCTION-BROWSE.md` §3.2（toolsbar）、§4.3（目录树 + 回收站入口）、§5.9（删除流程）
+- `.agents/memory/DESIGN.md` §12.11 #4（删除确认口径——按钮/键仍确认、拖动不确认）
+- `.agents/memory/FUTURE.md` #10（结项）
 - `specs/xmp-sidecar.md`（增补「库内移动」：移入/还原/真删三动作的 sidecar 伴随）
 - `specs/xmp-write-toggle.md` §2.2（「照片进回收站」一行的落点描述）
 - `todos/2026-10-10-library-recycle-bin.md`（归档移走）

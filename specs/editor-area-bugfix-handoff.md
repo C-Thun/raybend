@@ -13,14 +13,14 @@
 | 项 | 状态 | 证据 |
 | --- | --- | --- |
 | W0 设计稿四帧 | ✅ 崔总 2026-10-31「没问题」 | `design/editor.pen` + `design/editor.md` §「2026-10-31 编辑区（area）面板」 |
-| W1 类型 / 迁移 / 定稿 v3 / 参数 `target` | ✅ | `implementations/2026-10-31_editor-area-w1-types.md` |
-| W2 渲染（层循环 / 层内固定管线 / 控制点权重 / `PIPELINE_VERSION` 18） | ✅ | `implementations/2026-10-31_editor-area-w2-render.md` |
-| W3 撤销与持久化（`area_id` + 7 种结构 op） | ✅ | `implementations/2026-10-31_editor-area-w3-undo.md` |
-| W4 面板与画布（area panel / 层名条 / 标记 / 眼睛 / 命令） | ✅ | `implementations/2026-10-31_editor-area-w4-panel-canvas.md` |
-| W5 周边（预设 / XMP / auto_adjust / 缓存） | ✅ | `implementations/2026-10-31_editor-area-w5-surrounds.md` |
-| W6 收尾（i18n / 文档 / 质量门 / Windows 产物） | ✅ | `implementations/2026-10-31_editor-area-w6-closeout.md` |
-| 第三方评审 + 修复 | ✅ | `implementations/2026-10-31_editor-area-review-fixes.md` |
-| **真机 / GUI 验收（第 1 轮）** | ⚠️ 崔总 2026-11-01 报回 12 条（样式 / 手势 / 持久化 / 复用 / 配色 / 容差语义） | `implementations/2026-11-01_editor-area-bugfix-batch.md` |
+| W1 类型 / 迁移 / 定稿 v3 / 参数 `target` | ✅ | `.agents/implementations/2026-10-31_editor-area-w1-types.md` |
+| W2 渲染（层循环 / 层内固定管线 / 控制点权重 / `PIPELINE_VERSION` 18） | ✅ | `.agents/implementations/2026-10-31_editor-area-w2-render.md` |
+| W3 撤销与持久化（`area_id` + 7 种结构 op） | ✅ | `.agents/implementations/2026-10-31_editor-area-w3-undo.md` |
+| W4 面板与画布（area panel / 层名条 / 标记 / 眼睛 / 命令） | ✅ | `.agents/implementations/2026-10-31_editor-area-w4-panel-canvas.md` |
+| W5 周边（预设 / XMP / auto_adjust / 缓存） | ✅ | `.agents/implementations/2026-10-31_editor-area-w5-surrounds.md` |
+| W6 收尾（i18n / 文档 / 质量门 / Windows 产物） | ✅ | `.agents/implementations/2026-10-31_editor-area-w6-closeout.md` |
+| 第三方评审 + 修复 | ✅ | `.agents/implementations/2026-10-31_editor-area-review-fixes.md` |
+| **真机 / GUI 验收（第 1 轮）** | ⚠️ 崔总 2026-11-01 报回 12 条（样式 / 手势 / 持久化 / 复用 / 配色 / 容差语义） | `.agents/implementations/2026-11-01_editor-area-bugfix-batch.md` |
 | **第 1 轮修复** | ✅ 已落地并通过质量门（**待崔总在新产物上复验**） | 同上；验收清单见 §4 |
 
 **测试产物（含全部修复）**：`/mnt/c/rb-target/raybend/debug/raybend-desktop.exe`
@@ -88,7 +88,7 @@ pnpm build                              通过
 
 ## 2.5 2026-11-01 第 1 轮真机反馈与修复（**先读这一节**）
 
-12 条反馈全部落地，逐条对照表在 `implementations/2026-11-01_editor-area-bugfix-batch.md` §1。要点：
+12 条反馈全部落地，逐条对照表在 `.agents/implementations/2026-11-01_editor-area-bugfix-batch.md` §1。要点：
 
 | 类别 | 结论 | 现在的事实 |
 | --- | --- | --- |
@@ -97,7 +97,7 @@ pnpm build                              通过
 | 实时跟随 | 新增 `editor_overlay_state` + `lib/overlay-live.ts`：手势期间**每帧**读一次矩阵，静止不读 | `ViewportOverlay` / `AreaMarkers` 都优先读实时那份 |
 | 持久化 | `Area.params/curves` 不再 `skip_serializing_if`（空层省字段 ⇒ 前端 `Object.entries(undefined)` ⇒ 整次载入作废） | 建过 area 退出再进来**层还在**；issue 里也带层（`profile_schema_version` v3） |
 | 容差语义 | **两段式**：`core = tolerance × core_scale` 内 100%，`core..core+falloff` smoothstep 降到 0 | 两个比例在 `develop/areas.rs::POINT_WEIGHT_CONFIG`；`PIPELINE_VERSION 19` |
-| 复用 | LUT 链与 area 层的整行拖动合成一份 `RowDragSort`；四种删除统一 `RemoveButton` | 组件库方案：`memory/COMPONENTS.md`（`AGENTS.md` §12 指向它） |
+| 复用 | LUT 链与 area 层的整行拖动合成一份 `RowDragSort`；四种删除统一 `RemoveButton` | 组件库方案：`.agents/memory/COMPONENTS.md`（`AGENTS.md` §12 指向它） |
 | LUT | **恒可用**（编辑的永远是默认层那一段），不再因「当前是控制点层」变灰 | `lut-panel.tsx` / `left-panel.tsx` |
 | 配色 | 控制点八色压暗一档（压在白圈上要质感） | `tokens.css` `--point-0..7` |
 
@@ -109,7 +109,7 @@ pnpm build                              通过
 ### P0
 
 *（无已知 P0。若真机验出「拖动卡死 / 画面错位 / 撤销跳步」这类，按 P0 处理并在
-`implementations/` 起新文件，不要改历史记录。）*
+`.agents/implementations/` 起新文件，不要改历史记录。）*
 
 ### P1
 
@@ -220,7 +220,81 @@ pnpm build                              通过
 
 ## 6. 明确不做（这一轮）
 
-* 封闭控制点（`memory/FUTURE.md` D14）、蒙版 / 画笔 / 智能选区；
+* 封闭控制点（`.agents/memory/FUTURE.md` D14）、蒙版 / 画笔 / 智能选区；
 * 层复制 / 粘贴（D12）、三路色彩圆盘（D11）；
 * 层不透明度 UI（规格 §10 明确「近期不给」）；
 * 控制点的"影响面可视化"（容差是向量尺度，圈不出来）。
+
+---
+
+## Requirement (verbatim)
+
+> 来源 `specs/editor-area-bugfix-handoff.md`（2026-11-15 迁入；`todos/` 已退役）。**正文逐字保留**，只把标题层级降一级以免破坏本文档结构。
+
+## editor 预设面板（Presets）+ 右栏第 1 组等高优化
+
+> 2026-09-30 01:30 CST 崔总在对话中提出，当即开工（设计稿先行）。
+> 本文件是**需求原文暂存**（防丢细节），不是进度表；开工后以它为源写 `specs/`，做完删除或移走。
+> **状态（2026-09-30）**：设计稿已定案（崔总「可以」）→ 规格已写 `specs/editor-presets.md` →
+> **开发与冒烟已收口**（02:29 CST，全质量门绿，`.agents/implementations/2026-09-30_editor-presets.md`）→
+> 待崔总真机验收后按约定删除本文件。
+
+### 需求原文（verbatim）
+
+> 先做一个 editor 中的 preset 功能，这个功能如果在 future 里有就删掉，因为就要做了。就是在 editor right 的曲线面板右边增加一个面板 `预设` Presets，面板提供以下功能:
+> - 一个树状列表但只支持一级目录，`默认` Default 这级是必然存在，走语言包无法删除
+> - 用户只能在目录下创建 preset，目录可以自由折叠
+> - 这个面板第一层是几个工具图标（应用/新建目录/新建预设什么的），下面是可滚动的预设目录及预设部分
+> - 这个面板高度与曲线面板一样高，使得切换时不会面板不会伸缩
+> - 预设目录与预设新建时都是弹窗输入名称，简单点做
+> - 点击预设及目录一律是选中，选中预设的情况下 `应用` 按钮才可用，操作一律是点预设然后再点应用
+> - 鼠标悬浮在预设/目录上时右边显示出删除按钮图标，删除前询问，支持 easy destroy
+> - 目录不能直接删除，必须清空目录下的预设才会显示出删除按钮
+> - 预设本体就是把当前照片的调整参数（不包括基础曲线）包括 lut 一起存起来，下次点击就用，但注意 lut 文件有可能会丢失或本身 lut 就被删除了，要有保底，不存在的话忽略即可
+> - 目录创建时只要名字，预设创建时要选中目录，选中哪个目录或是哪个目录下的预设就创建在哪个目录里，除找不到选的目录就创建在默认里
+> - 预设可以按住 shift 键多选（一旦多选应用按钮也 disable 掉），也可以通过拖动移到另一个目录里去，一旦拖动了所有目录自动折叠起来，鼠标移到滚动区域的接近顶部和底部时如果没到头会自动滚动，释放后除了要打开移动进的目录外还要将原来目录的展开状还原
+> - 预设除了需要名字外还可按大类保存，默认全选，其实没几个可选：影调/色彩/清晰度/镜头/曲线/LUT（未来可能会加个色彩管理），查一下除了一堆 checkbox 外还有没有什么好看点的，交互舒服点的组件可以用来做这块的选择。
+> - 选择保存后就可以应用了，应用时就是把这个预设保存的大类覆盖当前参数，没有的大类参数不会被覆盖
+> - 鼠标在预设上悬停，显示一个简单的信息告知这个预设包括了哪些大类的参数，系统中应该有现成的效果已经实现过了，照抄。
+>
+> 开始前先设计 pencil 设计稿，注意复用已经有的设计，可以在设计前除了看现有的设计稿外，同时也看一眼当前的组件库，知道哪些组件能用。我们的思路是能复用就复用，能照抄就照抄，不要重复创建
+>
+> ---
+> 顺便优化下 editor right 顶部的总览/定稿/信息这三个面板的高度，将定稿的和信息的默认高度定在总览为 3:2 画幅下的高度加上直方图的高度之和，降低切换 tab 时的高度伸缩变化的感觉
+
+### 背景与落点
+
+- 原登记 `specs/PLAN.md` §4 #4 / `.agents/memory/FUTURE.md` 锁定块 #4 已于 2026-09-30 移除（崔总授权）。
+- 设计稿：`design/editor.pen`（第 3 组页签 + 新组件帧）+ `design/editor.md` 同步。
+- 复用源（调研 2026-09-30 已确认）：
+  - 结构照抄 LUT 面板（`features/editor/lut-panel.tsx`：一级分类 + 标题行图标按钮 + 折叠）；
+  - 弹窗照抄 `Dialog` + LUT 新建分类弹窗（取消左 / 确认右）；
+  - 悬浮删除照抄 `EasyDestroyButton`（禁行图标 + Shift 跳过确认）；
+  - 悬浮信息照抄 `Tooltip`（`components/ui/Tooltip.tsx`）；
+  - 大类选择：**chip 行**（多选 chip，选中 = `$state-selected`），先例 = 导入 LUT 弹窗的 CategoryChips；比 checkbox 舒服且是既有语言。
+  - 持久化照抄 LUT 分类：**设备级 `app.db`**（预设是应用级资产，换库可用；LUT 引用也是设备级）。
+
+### 大类 → 参数映射（初稿，specs 里定稿）
+
+| 大类 | 覆盖内容 |
+| --- | --- |
+| 影调 tone | exposure / contrast / highlights / blacks / dynamicContrast |
+| 色彩 color | temperature / saturation / vibrance |
+| 清晰度 detail | lumaNr / colorNr / sharpenAmount / sharpenRadius + nrMethod |
+| 镜头 lens | distortion / vignette / vignetteRange / chromaticBlue / chromatic + lensProfile + lensEnabled |
+| 曲线 curve | curves（用户曲线各通道；**不含基础曲线 baseCurve***） |
+| LUT | lutId + lutEnabled（应用时 LUT 不存在 → 忽略，不报错） |
+
+不存：geometry（裁切/旋转）、asShotK（照片自身元数据）、autoAdjust、sourceBase。
+
+### 验收要点
+
+- 默认目录不可删、名称走语言包；空目录才显示删除按钮；删除弹确认 + easy destroy（Shift）。
+- 选中单个预设 → 应用可用；多选（Shift）→ 应用禁用；应用只覆盖预设保存的大类。
+- 拖动移动：拖起全目录折叠、边缘自动滚动、释放后目标目录展开 + 原目录展开态还原。
+- 新建预设落到「选中目录 / 选中预设所在目录」，找不到落默认。
+- 预设悬浮提示列出所含大类（照抄现有 tooltip 效果）。
+- 第 3 组页签切换（曲线 ↔ 预设）面板高度不变。
+- 右栏第 1 组：定稿 / 信息默认高度 = 总览 3:2 高度 + 直方图高度。
+- 命令体系接入（§2.15）：新命令登记 + 默认热键决定（建议留空，写明理由）。
+- 单元测试齐备（§2.10）：清洗/映射/多选判定/拖动落点等纯逻辑。

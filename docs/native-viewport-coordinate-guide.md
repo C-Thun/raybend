@@ -175,7 +175,7 @@ pnpm spike:win
 - [WebView2 RasterizationScale：DPI 与文字缩放](https://learn.microsoft.com/en-us/dotnet/api/microsoft.web.webview2.core.corewebview2controller.rasterizationscale)
 - [devicePixelRatio 的定义与页面缩放](https://developer.mozilla.org/en-US/docs/Web/API/Window/devicePixelRatio)
 - [DirectComposition 基本坐标：根 visual 相对客户区](https://learn.microsoft.com/en-us/windows/win32/directcomp/basic-concepts)
-- 本仓 `implementations/2026-09-18_spike-coordinate-offset-report.md`（旧推断，已补勘误）
+- 本仓 `.agents/implementations/2026-09-18_spike-coordinate-offset-report.md`（旧推断，已补勘误）
 
 ## 8. 产品 GPU 底板与透明实验必须区分（2026-09-25）
 
@@ -236,11 +236,11 @@ WGSL 着色器共用原实现，没有增加像素回读/IPC/浏览器解码的�
   不能据此推导它已经实现 DirectComposition 隔离或解决所有拖动问题。
 
 平台接入现收口到 `PresentationAdapter`，接口边界与以后 macOS/Linux 的扩展方式以
-[memory/ARCHITECTURE.md §2.1](../memory/ARCHITECTURE.md) 为准。
+[.agents/memory/ARCHITECTURE.md §2.1](../.agents/memory/ARCHITECTURE.md) 为准。
 详细依赖版本、调用点及官方依据见
-[调查记录](../implementations/2026-09-25_editor-offscreen-composition-investigation.md)；
+[调查记录](../.agents/implementations/2026-09-25_editor-offscreen-composition-investigation.md)；
 默认固化与适配器验证见
-[实施记录](../implementations/2026-09-25_editor-directcomposition-default.md)。
+[实施记录](../.agents/implementations/2026-09-25_editor-directcomposition-default.md)。
 
 ### area space：编辑区坐标（2026-10-31 加入，`specs/editor-area.md`）
 

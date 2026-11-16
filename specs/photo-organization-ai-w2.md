@@ -20,4 +20,4 @@ XMP 在同一单元对齐：标准 keywords 只写有效文字；rb 版本化 JS
 
 实施细节：catalog_0015 增加 masks/results/attempts 与统一有效view，catalog_0017固定concept→文字映射；app_0011由W3管理队列。手工 undo只逆转manual/masks，TagDelta按实际前后投影计算。自家rb:tagState JSON格式1恢复时重绑当前原片来源、origin=sidecar；缺原片无效，不伪装本机推理，也不对跨机器原片作内容摘要一致性承诺。标准关键词、rb扩展、导出共用投影；未知/非法版本拒绝覆盖。
 
-本轮实施/验证/未测项：`implementations/2026-10-04_photo-organization-ai-foundation-and-model-gate.md`。
+本轮实施/验证/未测项：`.agents/implementations/2026-10-04_photo-organization-ai-foundation-and-model-gate.md`。

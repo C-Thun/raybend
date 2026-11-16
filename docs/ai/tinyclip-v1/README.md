@@ -1,6 +1,6 @@
 # TinyCLIP v1：准确率优先的折中阈值与交付依据
 
-2026-10-04 崔总定案：本期采用TinyCLIP、阈值折中并偏向减少误标，尽快进入上线前测试；SigLIP 2仅留 `memory/FUTURE.md` E1远期考查。原W1报告与失败记录保留在 `../2026-10-04/`，不重写原90%/60%门槛的结论。
+2026-10-04 崔总定案：本期采用TinyCLIP、阈值折中并偏向减少误标，尽快进入上线前测试；SigLIP 2仅留 `.agents/memory/FUTURE.md` E1远期考查。原W1报告与失败记录保留在 `../2026-10-04/`，不重写原90%/60%门槛的结论。
 
 ## 固定配置
 
@@ -78,6 +78,6 @@ CPU ORT 官方 Windows DLL 导入 MSVCP140/140_1、VCRUNTIME140/140_1；干净 W
 
 Windows 依次构建有AI、无AI、有AI；前两次冻结源码，最后一次正常 `pnpm debug:win -- --ai=required`，产物时间、4个嵌入前端引用、RAW协议7、原生AI标记及资源核对通过。当前可测试产物为 `C:\rb-target\raybend\debug\raybend-desktop.exe`；无AI副本为 `C:\rb-target\raybend-registry-test-off\raybend-desktop.exe`。无AI副本不含 ai-model/ai-runtime，worker 参数明确拒绝、stdout为空、exit2。`scripts/ai/worker-disabled-smoke.ps1` 可重复验证该合同。
 
-首个有AI产物两图CPU编码约201/138ms，加载含探针1340ms，峰值237445120 bytes；仅是公开小样本冒烟，不能作为稳定吞吐/内存上限。基础版XMP来源与禁止往返、手动标签等仍通过默认无推理依赖的测试。机器证据见 [build-switch-smoke.json](build-switch-smoke.json)，实施范围与限制见 `implementations/2026-10-04_ai-model-registry-optional-build.md`。
+首个有AI产物两图CPU编码约201/138ms，加载含探针1340ms，峰值237445120 bytes；仅是公开小样本冒烟，不能作为稳定吞吐/内存上限。基础版XMP来源与禁止往返、手动标签等仍通过默认无推理依赖的测试。机器证据见 [build-switch-smoke.json](build-switch-smoke.json)，实施范围与限制见 `.agents/implementations/2026-10-04_ai-model-registry-optional-build.md`。
 
 未制作安装器、推送或发布；新系统首次 Python 依赖安装、GUI、真实库和安装器切换仍需现场确认。系统前置要求会在制作命令开始时检测并提示。

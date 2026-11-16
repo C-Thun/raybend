@@ -82,7 +82,7 @@ pub const AVIF_SPEED: u8 = 10;
 ///
 /// 实测（同一张 384px 图，Windows release，真照片）：AVIF q90 要 **118–166 ms**，
 /// JPEG q82 只要 **3–5 ms**（体积 25 KB → 27 KB）——给 import 做 AVIF 是纯负优化。
-/// 依据 `implementations/2026-10-11_import-tiles-diagnosis.md`。
+/// 依据 `.agents/implementations/2026-10-11_import-tiles-diagnosis.md`。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum EncodeFormat {
     #[default]
@@ -433,7 +433,7 @@ pub fn decode_file(path: &Path, spec: DecodeSpec) -> Result<Option<DecodedSource
 /// * **图像**（JPEG/PNG/TIFF…）直接解码；
 /// * **RAW** 走 [`crate::raw`] 的 worker 进程（内嵌预览优先，见 `decode_raw_file`）；
 /// * **都不是**（或解不开）返回 `Ok(None)` —— 调用方据此用占位图
-///   （`memory/FUNCTION-REPOSITORY.md` §4.1）。
+///   （`.agents/memory/FUNCTION-REPOSITORY.md` §4.1）。
 pub fn render_file(path: &Path, size: SizeClass) -> Result<Option<Thumb>> {
     render_file_with_edit(path, size, None, None)
 }
@@ -925,7 +925,7 @@ pub fn clamp_display_aspect(img: DynamicImage, max_aspect: f64) -> DynamicImage 
 ///
 /// 输入是已经解出来、缩好尺寸的显示数据 —— 所以这一步只做「线性化 → 管线 → 回到 8bit」。
 /// 对 JPG / RAW 内嵌预览来说它是**准线性**（8bit 里本来就没有更多信息），
-/// 与编辑器里那条 JPG 路同一个口径（`memory/FUTURE.md` C7 记着收敛点）。
+/// 与编辑器里那条 JPG 路同一个口径（`.agents/memory/FUTURE.md` C7 记着收敛点）。
 ///
 /// # Errors
 /// 栈里的参数 / 曲线不合法（**不静默跳过** —— 那会让人看到一张「没生效」的图而不知道为什么）。
@@ -1010,7 +1010,7 @@ pub fn encode_with_lut(
 ///
 /// 单独拆出来只为一件事：**先出像素、比过尺寸，再决定要不要编码**。
 /// 内嵌预览常常小于目标档（相机实测全是 160×120），先编码再发现不够就是白烧一次编码
-/// （2026-10-11 实测 ~118 ms/张，见 `implementations/2026-10-11_import-tiles-diagnosis.md`）。
+/// （2026-10-11 实测 ~118 ms/张，见 `.agents/implementations/2026-10-11_import-tiles-diagnosis.md`）。
 ///
 /// # Errors
 /// 编辑栈里的参数 / 曲线不合法。
@@ -1124,7 +1124,7 @@ fn encode_jpeg_bytes(rgb: &[u8], width: u32, height: u32, quality: u8) -> Result
 /// 于是精修那一步去掉，只留盒式（`thumbnail` 的整数快路径）。
 ///
 /// 大幅缩小时两者观感差别很小（高频本就丢掉了）；真要再快一档得换解码器
-/// —— libjpeg-turbo 的 1/8 DCT 缩放解码登记在 `memory/FUTURE.md`。
+/// —— libjpeg-turbo 的 1/8 DCT 缩放解码登记在 `.agents/memory/FUTURE.md`。
 #[must_use]
 pub fn resize_for_thumb(img: DynamicImage, long: u32) -> DynamicImage {
     let (w, h) = (img.width(), img.height());
@@ -1196,7 +1196,7 @@ pub fn placeholder_image(kind: MediaKind, size: SizeClass) -> RgbImage {
 }
 
 // 占位图配色（这里**故意不引 tokens.css**：它是画布内容不是 UI 组件，
-// 但取值与 memory/DESIGN.md 的 `--surface-bar` / `--fg-3` 保持一致，改了要同步。）
+// 但取值与 .agents/memory/DESIGN.md 的 `--surface-bar` / `--fg-3` 保持一致，改了要同步。）
 const BG: [u8; 3] = [0x2a, 0x2d, 0x33];
 const EDGE: [u8; 3] = [0x3a, 0x3e, 0x46];
 const FG: [u8; 3] = [0xb6, 0xb0, 0xaf];

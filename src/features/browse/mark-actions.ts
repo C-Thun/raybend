@@ -127,7 +127,7 @@ export async function applyMarkIntent(
         return;
       }
       case "flag":
-        // 旗标不进筛选（`memory/FUNCTION-BROWSE.md` §3.1：它只活在内存里）——筛选态下不响应
+        // 旗标不进筛选（`.agents/memory/FUNCTION-BROWSE.md` §3.1：它只活在内存里）——筛选态下不响应
         return;
     }
   }

@@ -1,9 +1,9 @@
 # 交接文档：M3-W3 的 bug 批（2026-09-24）
 
 > **处理状态（2026-09-24 14:55 更新）**：§2 的十条里 **九条已完成**，
-> 实施记录见 `implementations/2026-09-24_w3-bug-batch-histogram-orientation-panels.md`；
+> 实施记录见 `.agents/implementations/2026-09-24_w3-bug-batch-histogram-orientation-panels.md`；
 > **§2.5 未做**（语义歧义 + latest 缓存是 AVIF、当前没有 AV1 解码器，需要人类拍板）；
-> §3 的优化设想按约定未动（已登记 `memory/FUTURE.md` D1.5）。
+> §3 的优化设想按约定未动（已登记 `.agents/memory/FUTURE.md` D1.5）。
 >
 > **交接时间**：2026-09-24 12:35:23 CST
 > **上一段会话做了什么**：见 §1（六个提交，M3-W3 已交付：显影管线 / 编辑栈 / 曲线 / 撤销 / AVIF 缓存 / 大图缓存 / issue 解析）。
@@ -57,10 +57,10 @@ pnpm debug:win            # 上面这一整套 + 产物核对（worker 也查）
 | `ed8370d` | **修「卡在正在载入照片」**：显影任务合并不许丢照片 + worker 协议握手（v2） |
 | `c94fe10` / `2c2ed79` | 文档与实施记录 |
 
-实施记录：`implementations/2026-09-24_m3-w3-develop-pipeline-and-cache.md`（含全部实测数字、AVIF 编码耗时、验收清单、遗留项）。
+实施记录：`.agents/implementations/2026-09-24_m3-w3-develop-pipeline-and-cache.md`（含全部实测数字、AVIF 编码耗时、验收清单、遗留项）。
 计划：`specs/M3-W3.md`（标注已交付）。
 
-**关键口径（别改错）**：参数只存非默认值；issue 只有 `latest` + 虚拟 SOOC/RAW；编辑落在 `_RAW/` 的 RAW 上（`memory/FUNCTION-REPOSITORY.md` §4.1）；
+**关键口径（别改错）**：参数只存非默认值；issue 只有 `latest` + 虚拟 SOOC/RAW；编辑落在 `_RAW/` 的 RAW 上（`.agents/memory/FUNCTION-REPOSITORY.md` §4.1）；
 色温是绝对 K（基线 = as-shot，随 issue 存 `develop_stacks.as_shot_k`）；缓存图一律 AVIF 90 / 4:4:4。
 
 ---
@@ -134,7 +134,7 @@ pnpm debug:win            # 上面这一整套 + 产物核对（worker 也查）
   每次都去解码 RAW（20MP ≈ 1.6s），而磁盘上可能已经有 `cache/full/<asset>/latest-v6.avif` 或那张 JPG。
 * **建议方向（有一层歧义，动手前先跟人类对齐）**：
   * 若只是「**先看到图**」：先显示 latest 缓存 / SOOC / RAW 的既有渲染（秒开），
-    再在后台解码 RAW 供编辑用（编辑必须落在 RAW 上 —— `memory/FUNCTION-REPOSITORY.md` §4.1 的口径不变）；
+    再在后台解码 RAW 供编辑用（编辑必须落在 RAW 上 —— `.agents/memory/FUNCTION-REPOSITORY.md` §4.1 的口径不变）；
   * 若人类要的是「**就用那份**」：那要注意 latest 缓存是**按当时参数渲染的**，拿它当编辑源会丢参数；
     真要这么做得先把参数读回来再套用（可行，但等于用缓存当「预览底」）。
   * 两条路都要**保持「编辑目标仍是 RAW」**，否则「编辑落在 RAW 上」这条口径就破了。
@@ -347,7 +347,7 @@ decode后的结果是缓存在内存中的，然后就是能在develop做的尽�
 2. **§2.14**：一批报上来的问题要**连续做完**，不要做一两项就回来确认；卡住了先做别的，最后一次性汇报。
 3. **§2.8 / §5.3.2**：Agent 只做冒烟（编译、单测、命令跑通）；**GUI 视觉、性能体感、色彩正确性一律归人类**。
    报结论时必须区分「已验证（冒烟）」与「未经人类验证」。
-4. **实施记录**：每完成一批改动写 `implementations/2026-09-24_<简述>.md`，首行精确到秒。
+4. **实施记录**：每完成一批改动写 `.agents/implementations/2026-09-24_<简述>.md`，首行精确到秒。
 5. **进度只用 `todo` 一份清单**（`~/.pi/agent/AGENTS.md`）。
 6. **数据库改动只走迁移框架**（§2.16）—— §2.7 若决定加 EXIF 字段就会碰到这条。
 7. **禁止全盘搜索**（§2.18）：只在 cwd / 已知路径里找。
@@ -380,4 +380,4 @@ decode后的结果是缓存在内存中的，然后就是能在develop做的尽�
 * **换照片会重新解码**（显影线程只缓存当前一张的线性源）—— §3(c) 的缓存想法直接冲它。
 * **大图缓存的容量 GC** 还没做（只有 `invalidate` 与版本自然失效）；**浏览侧的缩略图不会自动刷新**（编辑后要重进目录）。
 * **`develop_edit_target` 与「编辑落在 RAW 上」** 这条口径**没有被真机验证过**（人类还没验到那一步）。
-* 真机 E2E 的其余项见 `implementations/2026-09-24_m3-w3-develop-pipeline-and-cache.md` §6 的验收清单。
+* 真机 E2E 的其余项见 `.agents/implementations/2026-09-24_m3-w3-develop-pipeline-and-cache.md` §6 的验收清单。

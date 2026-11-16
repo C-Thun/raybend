@@ -61,7 +61,7 @@
 
 | 波次 | 内容 | 依赖 | 规模 | 主要风险 | 交付物 |
 | --- | --- | --- | --- | --- | --- |
-| **W1** | 过渡帧契约：同画幅 + 版本分层 + V2 接入 + 投递可靠 | — | 中 | 渲染线程投递规则改动可能带来陈旧帧 | 代码 + 单测 + `implementations/` 记录 |
+| **W1** | 过渡帧契约：同画幅 + 版本分层 + V2 接入 + 投递可靠 | — | 中 | 渲染线程投递规则改动可能带来陈旧帧 | 代码 + 单测 + `.agents/implementations/` 记录 |
 | **W2** | 管道与缓存：预览快照按栈指纹命名、不再整目录作废、后台重活队列、worker 优先级、V2 重建判据、解码预取 | W1（命名配合） | 大 | 缓存 GC 策略、队列改造面广 | 代码 + 单测 + 压力冒烟 |
 | **W3** | 会话状态收敛：SOOC 参照源按 asset 解析、对比参照真值上屏、两路判据统一 | W2 部分 | 中 | 前端标签语义变化（设计稿已要求） | 代码 + 单测 + 设计说明同步 |
 | **W4** | 白平衡：渲染侧以解码真值为基线 + 落库一致性 + **预设存偏移量（v3）** + 旧预设迁移 | 可并行 | 中 | payload 版本升级 / 旧预设观感变化（需崔总确认） | 代码 + 双端契约测试 + `specs/editor-presets.md` §3 更新 |
@@ -358,7 +358,7 @@ target        = 1_000_000 / (mired(asShot) − Δmired)
 > 扫描所有 issue 看有没有缺图、缺图重生，以及在 browse 中选中这个图的某个 issue 时
 > 没有 thumb 要重生成；错误倒不一定要报出来，不影响主线给个自动修复的机会就行」。
 > **前置**：另一 agent 2026-10-10 的「定稿链路提速与去闪」批已落地
-> （`implementations/2026-10-10_finalize-chain-and-preset-dblclick.md`：`preview-queue` 单飞队列、
+> （`.agents/implementations/2026-10-10_finalize-chain-and-preset-dblclick.md`：`preview-queue` 单飞队列、
 > `reuse_latest_preview` 复用、`IssueThumb` 旧图留守）—— 本波**只补自愈，不重做那一批**。
 
 ### 7.1 现状：已具备的自愈点与缺口
@@ -413,7 +413,7 @@ target        = 1_000_000 / (mired(asShot) − Δmired)
 - `src/features/browse/display-variants.ts`（或 browse 的变体选择处）
   - 选中 `issue:N` 变体后触发同一命令（scoped 到该资产）：保证该定稿三档齐。
     按需路径已能渲「被请求的那一档」，这一步是**补齐其余 + 给失败一次重试**。
-- 文档：`memory/FUNCTION-IMAGING.md` 的「定稿三档图」生成节点补一条「进入 / 选中时自愈」；
+- 文档：`.agents/memory/FUNCTION-IMAGING.md` 的「定稿三档图」生成节点补一条「进入 / 选中时自愈」；
   `design/editor.md` 无视觉改动（没有新控件）。
 
 ### 7.4 测试
@@ -455,13 +455,13 @@ target        = 1_000_000 / (mired(asShot) − Δmired)
    验收：`cargo test --workspace` 全绿 + 离屏 GPU 冒烟不变 + 真机观感无变化。
    **不做**像素路径合并（V2 是未来主线）。
 2. **文档**：
-   - `memory/ARCHITECTURE.md`：新增「编辑器会话与重活调度」一节（权威状态、队列与优先级、缓存命名）。
-   - `memory/FUNCTION-IMAGING.md`：预览快照命名与生成节点更新（W2 之后的口径）。
+   - `.agents/memory/ARCHITECTURE.md`：新增「编辑器会话与重活调度」一节（权威状态、队列与优先级、缓存命名）。
+   - `.agents/memory/FUNCTION-IMAGING.md`：预览快照命名与生成节点更新（W2 之后的口径）。
    - `AGENTS.md` §6.5：缓存红线里 `latest` 的命名口径一句话更新。
    - `design/editor.md`：过渡帧口径（W1 已加）+ 对比参照实际来源的显示（W3）。
    - `specs/xmp-sidecar.md`：确认「`temperature` 不映射」的声明在本期后依然成立（§2.19 的落档）。
 3. **性能证据**：同一批照片、同设置下的切图时序（`[editor] 真帧…` 的解码/管线 ms、过渡帧耗时）
-   W1 前 / W2 后各记一份，进 `implementations/`。
+   W1 前 / W2 后各记一份，进 `.agents/implementations/`。
 4. **真机验收清单**（交崔总）：见 §10.3。
 
 ---
@@ -486,7 +486,7 @@ target        = 1_000_000 / (mired(asShot) − Δmired)
 - 质量门：`pnpm typecheck && pnpm test && pnpm lint:colors && pnpm lint:arch && pnpm lint:i18n && pnpm build`；
   `cargo test --workspace`、`cargo clippy -p raybend -p raybend-desktop`。
 - 运行时冒烟：`pnpm smoke:ui`（起 `pnpm dev` 的另一终端）；离屏 GPU 冒烟保持既有项。
-- 每波写一份 `implementations/YYYY-MM-DD_<简述>.md`（首行精确到秒；含改动范围、关键决策、
+- 每波写一份 `.agents/implementations/YYYY-MM-DD_<简述>.md`（首行精确到秒；含改动范围、关键决策、
   验证命令与结果、遗留）。
 
 ### 10.2 不得由 Agent 判定
@@ -514,7 +514,7 @@ GUI 交互与视觉正确性、多显示器与 DPI、真实照片库观感、性
 - **「issue 预览慢」（另一 agent，2026-10-10 已完成）**：那批已交付 `preview-queue`（单飞 + 最新者优先）、
   `reuse_latest_preview`（同画面不渲两遍）、`IssueThumb` 旧图留守（不闪）—— **W5 在它之上补自愈**，
   不重做；W2 的队列与就绪登记表落地后，两边共用同一份（谁先动手谁定接口，另一方接入）。
-  两个会话在 `implementations/` 互相留指针，避免各造一份队列。
+  两个会话在 `.agents/implementations/` 互相留指针，避免各造一份队列。
 - **色彩管理**：`decode_working_source` 的口径不动；W4-6.2 的 as-shot 覆盖要**同时**覆盖 legacy 与 V2。
 - **M4 导出**：导出预览进 P1/P3 队列，但导出像素口径与产物不变。
 - **XMP**：本期明确无 sidecar 字段变化（§1.2）；若 W4 实现中出现需要写 sidecar 的冲动，
@@ -530,8 +530,8 @@ GUI 交互与视觉正确性、多显示器与 DPI、真实照片库观感、性
 | Rust 外壳 | `src-tauri/src/editor.rs`、`editor_working.rs`、`develop.rs`、`thumbs.rs`、`issues.rs`、新 `work.rs` | W1 W2 W3 W4 |
 | 前端 | `src/lib/white-balance.ts`（新）、`src/lib/presets.ts`、`src/features/editor/store.ts`、`src/workspaces/editor/EditorWorkspace.tsx`、`src/api/types.ts`、`src/features/browse/display-variants.ts` | W3 W4 W5 |
 | 文案 | `src/i18n/zh-CN.ts` / `en-US.ts`（迁移提示、跳过错项提示；两语同步） | W4 |
-| 文档 | `specs/editor-presets.md`（§3 v3）、`design/editor.md`、`memory/ARCHITECTURE.md`、`memory/FUNCTION-IMAGING.md`、`AGENTS.md` §6.5、`specs/xmp-sidecar.md` | W1 W3 W6 |
-| 记录 | `implementations/` 每波一份 | 全部 |
+| 文档 | `specs/editor-presets.md`（§3 v3）、`design/editor.md`、`.agents/memory/ARCHITECTURE.md`、`.agents/memory/FUNCTION-IMAGING.md`、`AGENTS.md` §6.5、`specs/xmp-sidecar.md` | W1 W3 W6 |
+| 记录 | `.agents/implementations/` 每波一份 | 全部 |
 
 ---
 
@@ -539,7 +539,7 @@ GUI 交互与视觉正确性、多显示器与 DPI、真实照片库观感、性
 
 1. §1.1 的 G1–G6 全部有证据（单测 + 冒烟 + 真机清单已交崔总）。
 2. §10.3 的真机验收清单在 Windows 真机上逐条勾过（或明确记录哪几条未验与原因）。
-3. 每波的 `implementations/` 记录齐备；`specs/editor-presets.md` / `memory/*` 已同步到实施后的口径。
+3. 每波的 `.agents/implementations/` 记录齐备；`specs/editor-presets.md` / `.agents/memory/*` 已同步到实施后的口径。
 4. 没有引入第二份实现：过渡帧、参照源解析、白平衡换算、预览缓存命名、定稿图自愈的判定与生成，各自只有一处。
 
 ---
@@ -547,11 +547,11 @@ GUI 交互与视觉正确性、多显示器与 DPI、真实照片库观感、性
 ## 14. 实施状态（2026-10-10 收尾，Agent 侧）
 
 > 勾选项保持为**验收清单**；真机项（GUI / 观感 / 体感 / 色彩）一律未勾，归崔总按 §10.3 执行。
-> 每波的实施记录在 `implementations/2026-10-10_editor-session-w*.md`。
+> 每波的实施记录在 `.agents/implementations/2026-10-10_editor-session-w*.md`。
 
 | 波次 | 状态 | 证据 / 说明 |
 | --- | --- | --- |
-| W1 过渡帧契约 | ✅ 代码 + 单测 | `implementations/2026-10-10_editor-session-w1-transition-contract.md`；投递判据比规格收紧一格（`decode != ready` **且** `painted_path != path`），理由在记录里 |
+| W1 过渡帧契约 | ✅ 代码 + 单测 | `.agents/implementations/2026-10-10_editor-session-w1-transition-contract.md`；投递判据比规格收紧一格（`decode != ready` **且** `painted_path != path`），理由在记录里 |
 | W2 管道与缓存 | ✅ 代码 + 单测（W2.7 的 full LRU 未做） | `…-w2-pipeline-and-queue.md`；`thumb_get` / `view_image` / 导出预览未进队列（理由在案） |
 | W3 会话状态收敛 | ✅ 代码 + 单测 | `…-w3-reference-sources.md` |
 | W4 白平衡 | ✅ 代码 + 单测；§6.8 存量修复**未执行**（待裁决） | `…-w4-white-balance-v3.md`；修复工具 `fix-as-shot-k`（默认预演） |

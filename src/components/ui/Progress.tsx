@@ -1,13 +1,13 @@
 /**
  * `Progress` —— 进度条（全项目唯一一份）。
  *
- * 规格走 `memory/DESIGN.md` 与 `design/main.md` §3.5 / `design/editor.md` §3.1.2：
+ * 规格走 `.agents/memory/DESIGN.md` 与 `design/main.md` §3.5 / `design/editor.md` §3.1.2：
  * 高 6、轨道 `surface-track`、填充 `brand`、两端圆角。
  *
  * 两种状态：
  *   * **确定态**（`value` 是数字）：按百分比画填充；
  *   * **不确定态**（`value` 为 `null` / 省略）：**没有总数**时不编百分比，
- *     画一道来回跑的亮条（`memory/FUNCTION-REPOSITORY.md` §4.4 的「扫描阶段」口径）。
+ *     画一道来回跑的亮条（`.agents/memory/FUNCTION-REPOSITORY.md` §4.4 的「扫描阶段」口径）。
  *
  * 为什么单独抽出来：导入（`ImportProgressDialog`）与 LUT 导入（编辑器左列）是同一件事的两处入口，
  * 各写一条进度条必然久而久之长得不一样（`AGENTS.md` §2.12）。

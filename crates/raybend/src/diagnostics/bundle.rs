@@ -8,7 +8,7 @@
 //! ```
 //!
 //! **不发送、不联网**：这只是把已脱敏的记录打成一个包（规格 §7.2 的 T0 下限）。
-//! 上传（T1 自建接收服务）与报告对话框属第三层其余部分，仍留在 `memory/FUTURE.md`。
+//! 上传（T1 自建接收服务）与报告对话框属第三层其余部分，仍留在 `.agents/memory/FUTURE.md`。
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};

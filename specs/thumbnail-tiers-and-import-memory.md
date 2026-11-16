@@ -2,7 +2,7 @@
 
 > 崔总 2026-10-11 定。**「缩图规格有哪几档」「import（库外）的图存在哪」这两件事的唯一事实来源就是本文件。**
 > 配套：`AGENTS.md` §2.24（库外/库内两套口径）、`specs/view-true-image.md`（看图显示真身）、
-> `memory/FUNCTION-IMAGING.md` §2（库内三种图分工总表）。
+> `.agents/memory/FUNCTION-IMAGING.md` §2（库内三种图分工总表）。
 >
 > 一句话：**全局只剩两档缩图（thumb 384 / preview 1920）+ 真身；192（strip）这一档取消；
 > import 的图一律只在进程内存里，view 里不要 1920，直接用 384 顶着等真身。**
@@ -38,7 +38,7 @@
 `render::resize_for_thumb` **去掉 Lanczos3 精修**，只用盒式快降（`imageops::thumbnail`）——
 import 只求「最快出现」，画质可以让步。真身档与库内档同样走它（口径统一，不搞两套）。
 
-> 下一步的提速（**登记 `memory/FUTURE.md`，不在本轮**）：libjpeg-turbo 的 1/8 DCT 缩放解码，
+> 下一步的提速（**登记 `.agents/memory/FUTURE.md`，不在本轮**）：libjpeg-turbo 的 1/8 DCT 缩放解码，
 > 预期单张 200 ms → 30–60 ms（要新增 C 依赖 + Windows 静态库 + 许可登记，按 `AGENTS.md` §2.9 单开一轮）。
 
 ## 4. 验收清单
@@ -50,7 +50,7 @@ import 只求「最快出现」，画质可以让步。真身档与库内档同�
 - [ ] import 看图：占位 = 384 thumb，终态 = 真身；不再请求 1920
 - [ ] 库外真身进内存（10 条）；位图真身仍走「原文件字节」短路
 - [ ] `thumbs.db` 里已有的 strip 行清掉（一次性）
-- [ ] 文档：`AGENTS.md` §2.24 / §11.5 / §6.5、`memory/FUNCTION-IMAGING.md` §2、`memory/FINISHED.md`、`memory/FUTURE.md`
+- [ ] 文档：`AGENTS.md` §2.24 / §11.5 / §6.5、`.agents/memory/FUNCTION-IMAGING.md` §2、`.agents/memory/FINISHED.md`、`.agents/memory/FUTURE.md`
 - [ ] 质量门：`cargo test --workspace`、`pnpm typecheck && pnpm test && pnpm lint:colors && pnpm lint:arch && pnpm lint:i18n && pnpm build`、`pnpm check:import`
 - [ ] 真机：探针跑 `--source` 之后**磁盘缓存一行都没写**；单张 / 一屏成本记录到实施记录
 - [ ] 人类真机确认：tile 观感（JPEG q82 + 盒式重采样）、胶片带观感（384 缩小显示）、import 看图的过渡

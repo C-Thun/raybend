@@ -5,7 +5,7 @@
  *   ② 用户点了某个库（列表里换选中、卡片的「重新查找」、命令「重新连接」）。
  * 曾经的自动重试链（1s/3s/10s）、窗口回焦点、卷表变化这三类**都删掉**了 ——
  * 库离线是事实，后台反复探它只会刷屏日志与磁盘；插上盘之后用户点一次才是唯一入口
- * （`memory/FUNCTION-REPOSITORY.md` §2.3）。
+ * （`.agents/memory/FUNCTION-REPOSITORY.md` §2.3）。
  */
 import type { RepositoryConnection, Volume } from "../../api/types.ts";
 import { untrack } from "solid-js";

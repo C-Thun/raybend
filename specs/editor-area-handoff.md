@@ -92,7 +92,7 @@ pub enum AreaKind {
   * `PROFILE_SCHEMA_VERSION` —— **读取上限**，已提到 **3**。
     （W1 时只改了前者忘了后者，结果是"写完读不回"；已修。）
 
-### 1.4 控制点八色（`memory/DESIGN.md` §15.5）
+### 1.4 控制点八色（`.agents/memory/DESIGN.md` §15.5）
 
 固定八色、**存槽位下标不存色值**：`#EF884C #4CE4EF #EAEF4C #4C62EF #7DEF4C #BE4CEF #4CEF88 #EF4C98`。
 `design/editor.pen` 里有同名变量 `point-0..point-7`。与 browse 色标（`--label-*`）刻意分家。
@@ -251,7 +251,7 @@ render_develop16: 镜头 warp → 降噪 → render_rgb16_with_local_tone（逐�
 7. **默认层不是 `areas[0]`**，是栈自己；位置在 `default_index`。
 8. **两个版本号**：`profile_schema_version()` 按内容选；`PROFILE_SCHEMA_VERSION` 是读取上限，加版本时**两个一起动**。
 9. **参数表三处同步**（Rust / JSON / 前端读同一份），加参数就归 `target`，并归 XMP 的 `SCALARS` 或 `NOT_MAPPED`。
-10. **不做封闭控制点**（方案存档 `memory/FUTURE.md` D14），也不给 `Point` 加任何"封闭"开关。
+10. **不做封闭控制点**（方案存档 `.agents/memory/FUTURE.md` D14），也不给 `Point` 加任何"封闭"开关。
 
 ## 7. 已知陷阱（都是踩过的）
 
@@ -291,7 +291,7 @@ W2 之后额外跑一次 `cargo test --workspace` 里的 xmp 组（`cargo test -
 **交付物**：
 
 1. 全部质量门绿（把命令原文与结果写进实施记录，**别写"全绿"了事**）；
-2. `implementations/2026-11-XX_editor-area-w{2..6}.md` 每波一份；
+2. `.agents/implementations/2026-11-XX_editor-area-w{2..6}.md` 每波一份；
 3. `specs/editor-area.md` 的波次表与决策账本同步（做完的勾掉、变了的改口径）；
 4. **给崔总出测试产物用 `pnpm debug:win`**（不是 `release`，release 会顶版本号且 15 分钟起）；
 5. 交付说明里必须分清「单元测试已验证」与「未经人类验证」（GUI / 真机 / 性能体感 / 色彩正确性都属后者）。
@@ -302,9 +302,9 @@ W2 之后额外跑一次 `cargo test --workspace` 里的 xmp 组（`cargo test -
 
 ## 10. 明确不做
 
-* **封闭控制点**（`memory/FUTURE.md` D14）；
+* **封闭控制点**（`.agents/memory/FUTURE.md` D14）；
 * 蒙版 / 智能蒙版 / 画笔；
 * 层不透明度 UI（字段保留、界面不给）；
 * 控制点的"显示影响面"；
-* 层复制 / 粘贴（`memory/FUTURE.md` D12，「有人给我钱了再做」）；
-* 三路色彩圆盘（`memory/FUTURE.md` D11）。
+* 层复制 / 粘贴（`.agents/memory/FUTURE.md` D12，「有人给我钱了再做」）；
+* 三路色彩圆盘（`.agents/memory/FUTURE.md` D11）。

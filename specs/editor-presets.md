@@ -1,14 +1,14 @@
 # specs/editor-presets.md — 编辑预设面板（Presets）
 
 > **工作单元**：editor 右栏第 3 组新增「预设」页签（面板 + 存储 + 应用）+ 第 1 组三页签等高。
-> **定案**：崔总 2026-09-30 审阅设计稿后「可以」；需求原文 `todos/2026-09-30-editor-presets.md`；
+> **定案**：崔总 2026-09-30 审阅设计稿后「可以」；需求原文 `specs/editor-area-bugfix-handoff.md`；
 > 设计定案 `design/editor.md` §3.10 / §3.11，画稿 `design/editor.pen`
 > （`e4WYe` 面板本体 / `nxMA2` 浮层 / `WCT5O` 等高说明 / 主稿与三派生帧页签条）。
 > **纪律**：复用优先（§2.12）——结构照抄 LUT 面板、弹窗照抄 Dialog、删除照抄 EasyDestroy、
 > 提示照抄 Tooltip、拖拽复用 `lib/pointer-drag.ts`；不新造第二份。
-> **2026-10-07 审计修复**：`implementations/2026-10-04_editor-presets-audit.md` 的发现已逐条修复
+> **2026-10-07 审计修复**：`.agents/implementations/2026-10-04_editor-presets-audit.md` 的发现已逐条修复
 > （等高容器、选中收敛、名称上限、库串行、版本契约、错误区分、rev 单次、应用前重读 LUT），
-> 记录见 `implementations/2026-10-07_editor-presets-audit-fixes.md`；真机验收仍待崔总。
+> 记录见 `.agents/implementations/2026-10-07_editor-presets-audit-fixes.md`；真机验收仍待崔总。
 
 ---
 
@@ -274,7 +274,7 @@ min-height: calc((var(--panel-w-right) - var(--panel-pad) - var(--panel-pad-scro
 
 **Agent 冒烟**：`pnpm typecheck && pnpm test && pnpm lint:colors && pnpm lint:arch && pnpm lint:i18n && pnpm build` + `cargo check --workspace` + `pnpm smoke:ui`（第 3 组切页签等高、预设树有界自滚）。**真机验收（人类）**：新建目录/预设（含超长名提示）、应用观感、拖拽（含多选与边缘滚动）、LUT 丢失应用、等高手感。
 
-**验收清单（崔总需求逐条）**：见 `todos/2026-09-30-editor-presets.md` §验收要点（14 条），实现后逐条核对。
+**验收清单（崔总需求逐条）**：见 `specs/editor-area-bugfix-handoff.md` §验收要点（14 条），实现后逐条核对。
 
 ---
 
@@ -284,4 +284,4 @@ min-height: calc((var(--panel-w-right) - var(--panel-pad) - var(--panel-pad-scro
 2. `src/api/presets.ts` + `src/lib/presets.ts` + 单测（纯逻辑先行）。
 3. `store.ts` 扩展 + `preset-panel.tsx` + `panels.tsx` 页签 + `EditorWorkspace.tsx` 接线 + i18n。
 4. 第 1 组等高（独立小改动）。
-5. 质量门 + `implementations/2026-09-30_editor-presets.md`（首行精确到秒）。
+5. 质量门 + `.agents/implementations/2026-09-30_editor-presets.md`（首行精确到秒）。

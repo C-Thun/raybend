@@ -18,7 +18,7 @@
 | `splash_v1-cn.webp` / `splash_v1-en.webp` | 下载区的主视觉（艺术合成图） | 1086×814，白底 + 透明边缘，放白卡片上正好 |
 | `favicon.ico` | 站点图标 | — |
 
-> 这些是**项目自有素材**，来源与生成方式记录在 `implementations/2026-09-17_branding-and-splash.md`。
+> 这些是**项目自有素材**，来源与生成方式记录在 `.agents/implementations/2026-09-17_branding-and-splash.md`。
 
 ---
 

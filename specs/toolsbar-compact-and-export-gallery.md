@@ -1,9 +1,9 @@
 # toolsbar 紧缩 · 统一悬停提示 · 导出筛选与画廊小改
 
 > 工作单元：崔总 2026-10-11 口述（无里程碑编号，属导出工作流与全局工具条的体验修整）
-> 状态：**spec 待崔总审** → 审后 Pencil 画稿（崔总二审）→ 实施
-> 需求原文：`todos/2026-10-11-toolsbar-compact-export-filter-raw-tile.md`
-> 关联：`memory/DESIGN.md` §12.12（工具条分组/分隔/文字按钮带图标）、`design/export.md` §2.1 与 §4.2、
+> 状态：**spec 待崔总审** → 审后设计稿（paintress，崔总二审）→ 实施
+> 需求原文：`specs/M2-W2-tiles-film-view-unify.md`
+> 关联：`.agents/memory/DESIGN.md` §12.12（工具条分组/分隔/文字按钮带图标）、`design/export.md` §2.1 与 §4.2、
 > `design/browse.md` §2.1、`design/editor.md` §2.1、`specs/export-issue-ordinal.md` §4（**本轮修订**）
 
 ---
@@ -30,7 +30,7 @@
 
 ### 1.1 toolsbar 文字精简（全 flow 审计）
 
-判据（沿用并补充 `memory/DESIGN.md` §12.12）：**图标能独立表意 → 去文字**；文字承载**状态值**
+判据（沿用并补充 `.agents/memory/DESIGN.md` §12.12）：**图标能独立表意 → 去文字**；文字承载**状态值**
 （锁档位、展示范围、编辑源）或该动作**容易误认**（排除族图标本就共用一枚禁行符）→ 保留文字。
 去文字后**必须**有 `label`（无障碍名）与统一悬停提示（§1.2）。
 
@@ -81,7 +81,7 @@
 | export right | 全部停止 `export.stopAll` | 图标 + 文字 | **精简** ⚠ | 停止符号通用；只有导出中才可点，状态靠可用性表达 |
 
 > ⚠ = 可回退项，列入 §2 待崔总一次拍板（Q1）。回退只需要把该行改回「保留文字」，不影响其它部分。
-> 精简后**分组与分隔不变**（`memory/DESIGN.md` §12.12）；`Button` 纯图标档保持既有 `--btn-h-*` 与
+> 精简后**分组与分隔不变**（`.agents/memory/DESIGN.md` §12.12）；`Button` 纯图标档保持既有 `--btn-h-*` 与
 > `--btn-pad-x`（命中区与节奏不缩水），不做「方形小按钮」特例。
 
 ### 1.2 图标按钮的悬停提示统一进按钮组件
@@ -247,7 +247,7 @@ browse / editor 工具条用**原生 `title=`**（样式不可控、延迟约 1s
 | 导出 store | `src/workspaces/export/store.ts` | 显式 references 入队路径（拖放用）；**不再需要** RAW 专用入队动作（第二轮删除） |
 | i18n | `src/i18n/zh-CN.ts`、`en-US.ts` | 新增 tip key，其余复用 |
 | 冒烟脚本 | `scripts/check-export-boot.mjs` | 断言改为「≤2 小片 + 无 raw tile + RAW 按钮存在」 |
-| 文档 | `memory/DESIGN.md` §12.12 | 补「可精简为纯图标 + 提示归按钮组件」的口径 |
+| 文档 | `.agents/memory/DESIGN.md` §12.12 | 补「可精简为纯图标 + 提示归按钮组件」的口径 |
 | 文档 | `design/export.md` / `design/browse.md` / `design/editor.md` | 与画稿同步修订对应小节 |
 | 文档 | `specs/export-issue-ordinal.md` | §4 加修订指针 |
 
@@ -280,9 +280,9 @@ pnpm build && pnpm check:export        # 需另一终端 pnpm dev；断言已按
 
 ---
 
-## 5. Pencil 画稿计划（开工后第一步，画完等崔总审）
+## 5. 设计稿计划（开工后第一步，画完等崔总审）
 
-当前活动画布：`design/export.pen`（已确认连通）。
+工具：**paintress**（`.agents/memory/PAINTRESS.md`），直接读写磁盘、无需打开编辑器。
 
 1. **export.pen（主战场）**
    - `SQH2c` `Components / Export / ToolsBar 三段式与三态`：mid 改为紧缩后的纯图标按钮 + 新增筛选组，
@@ -293,9 +293,8 @@ pnpm build && pnpm check:export        # 需另一终端 pnpm dev；断言已按
    - 新增 `States / Export / 四列网格`：290 / 920 宽两种中列下的列数与最小档示意（说明「−20% 换来四列」）。
 2. **browse.pen**：主稿 `o2OJy2` 与 `States / 浏览标记与选择` 的工具条行去掉已精简的文字，补一处悬停气泡。
 3. **editor.pen**：`FPvEw` `Components / Editor / ToolsBar 三段式` + 主稿 `P1JiB` 同步去文字。
-4. **操作纪律**：一次只对一个 `filePath` 动手；每次动手前用 `pencil_get_app_state` 核对活动文档，
-   画后用帧名/节点 id 复核；若 Pencil 把两个 `.pen` 解析成同一文档（2026-09-26 出过的事故），
-   **立即停下报告崔总**，不自行清理。
+4. **操作纪律**：一次只改一个文件；改前 `paintress_doc_info` 核对顶层 board，改后 `validate` + 截图，
+   并在实施记录里写清帧名与节点 id；改前先备份（`cp … /tmp/….bak`）。
 5. 画稿定案后同步 `.md` 说明（`design/export.md` 等），再动代码（§5.1 设计先行）。
 
 ---

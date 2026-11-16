@@ -27,7 +27,7 @@
  * ```
  *
  * 什么时候跑：**每次 `cargo test --workspace` / `--all-targets` 之后**
- * （这两条会把 examples 整套重建，见 `memory/ARCHITECTURE.md` §8 第 10 条）。
+ * （这两条会把 examples 整套重建，见 `.agents/memory/ARCHITECTURE.md` §8 第 10 条）。
  */
 
 import { existsSync, readdirSync, rmSync, statSync } from "node:fs";

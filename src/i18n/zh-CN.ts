@@ -1,7 +1,7 @@
 /**
  * 中文语言包（主语言，key 的基准）。
  *
- * 约定（memory/DESIGN.md §11）：
+ * 约定（.agents/memory/DESIGN.md §11）：
  *   - key 用英文小写点分层级，与组件层级对齐
  *   - 界面文案零硬编码，一律走 key
  *   - 中文不是英文的机械翻译，按中文习惯写
@@ -509,7 +509,7 @@ export const zhCN = {
  "source.volume.cloud": "云盘",
  "source.volume.unknown": "未知来源",
 
- // ── 中列：照片区（design/main.md §3.2、memory/DESIGN.md §12.7）─
+ // ── 中列：照片区（design/main.md §3.2、.agents/memory/DESIGN.md §12.7）─
  "grid.count": "{n} 张",
  "grid.exclude": "排除",
  "grid.fit": "适合屏幕",
@@ -842,7 +842,7 @@ export const zhCN = {
  // ── 命令注册表 / 命令面板 / 快捷键（M2-W3）────────────────
  "palette.placeholder": "输入命令…",
  "palette.empty": "没有匹配的命令",
- // 灰掉的行要说明「为什么现在不能用」（memory/DESIGN.md §12.11 第 3 条）
+ // 灰掉的行要说明「为什么现在不能用」（.agents/memory/DESIGN.md §12.11 第 3 条）
  "palette.unavailable.when": "当前场景不可用",
  "palette.unavailable.enabled": "当前条件下不可用",
   "shortcuts.title": "快捷键",
@@ -1110,7 +1110,7 @@ export const zhCN = {
  "cmd.nav.movePrev": "移动当前那张：上一张",
  "cmd.nav.moveNext": "移动当前那张：下一张",
 
- // ── 编辑工作区（M3-W1；design/editor.md + prompts/editor.pd）──
+ // ── 编辑工作区（M3-W1；design/editor.md + .agents/prompts/editor.pd）──
  "editor.toolsbar.lut": "LUT",
  "editor.toolsbar.preset": "预设",
  "editor.toolsbar.issues": "定稿",

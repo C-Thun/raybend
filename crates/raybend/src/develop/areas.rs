@@ -26,7 +26,7 @@ use std::collections::BTreeMap;
 use super::curve::{Curve, CurveChannel, CurveSet};
 use super::params::{DevelopParams, ParamTarget, target as param_target};
 
-/// 编辑区层数上限（**不含默认层**；`memory/LIMITS.md`）。
+/// 编辑区层数上限（**不含默认层**；`.agents/memory/LIMITS.md`）。
 ///
 /// 与 `store::develop::MAX_AREAS` 同一个数 —— 那条是数据侧的真相（DB / 校验都用它），
 /// 这里只在渲染侧做一次防御（越界的列表直接截断，不让一次坏数据拖垮整张图）。

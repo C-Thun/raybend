@@ -61,7 +61,7 @@ import { EDITOR_LEFT_BOTTOM_INFO, EDITOR_LEFT_WIDTH } from "./layout.ts";
  * 「信息」页签要的字段（**结构类型**，由工作区拼好传进来）。
  *
  * 为什么不让本模块自己去查：`features/*` 之间不许互相 import（分层规则），
- * 而照片数据属于浏览那一侧 —— 工作区把两块接起来正是它的职责（`memory/ARCHITECTURE.md` §2）。
+ * 而照片数据属于浏览那一侧 —— 工作区把两块接起来正是它的职责（`.agents/memory/ARCHITECTURE.md` §2）。
  * 这里的字段**都是显示字符串**（格式化的唯一实现在 `features/exif-strip/exif-format.ts`
  * 与 `lib/datetime.ts`）。
  *

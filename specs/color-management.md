@@ -1,12 +1,12 @@
 # 色彩管理 —— 产品方向与架构边界
 
 > 建立：2026-09-26｜本轮修订：2026-10-04
-> **状态：2026-09-30 崔总批准方向并授权开工；按 `memory/PLAN.md` §4 的 CM-W1～W5 排期实施。** editor right 第三组为 `曲线 · 预设 · 色彩管理`；所有系统互操作须提前按 adapter 架构设计。本文件描述最终闭环，已交付范围以各波次实施记录为准。
-> **首版交付（2026-10-04）**：W1–W5 本轮范围的开发与 Agent 冒烟已完成，可统一实机验收；最终路径、边界和产物见 `../implementations/2026-10-04_color-management-ready-for-acceptance.md`。真实色彩/多屏和整窗性能仍未验收。
+> **状态：2026-09-30 崔总批准方向并授权开工；按 `specs/PLAN.md` §4 的 CM-W1～W5 排期实施。** editor right 第三组为 `曲线 · 预设 · 色彩管理`；所有系统互操作须提前按 adapter 架构设计。本文件描述最终闭环，已交付范围以各波次实施记录为准。
+> **首版交付（2026-10-04）**：W1–W5 本轮范围的开发与 Agent 冒烟已完成，可统一实机验收；最终路径、边界和产物见 `../.agents/implementations/2026-10-04_color-management-ready-for-acceptance.md`。真实色彩/多屏和整窗性能仍未验收。
 > 本文件是主题规格的唯一正文：回答做多深、各层责任、系统协作、面板、全局策略、预设与 XMP。
 > 不在本轮锁定字段拼写、SQL、控件尺寸或工期；后续每次只规划一个实施波次，界面先画 Pencil 并自行审视；崔总已授权无需中途确认直接实施，文件保存由崔总完成。
 > 本次替换 9 月 26 日草案中过时的现状与有误的技术建议，修正说明见 §11。
-> 相关：`memory/FUTURE.md` C1/C2、`specs/editor-presets.md`、`specs/issue-xmp-contract.md`、`memory/FUNCTION-IMAGING.md`。
+> 相关：`.agents/memory/FUTURE.md` C1/C2、`specs/editor-presets.md`、`specs/issue-xmp-contract.md`、`.agents/memory/FUNCTION-IMAGING.md`。
 
 ## 1. 建议达到的产品程度
 
@@ -142,7 +142,7 @@ WebView 管 DOM 图片，原生管 GPU 照片；两条交付路径都需明确�
 
 ### 5.3 系统互操作 adapter 边界（崔总 2026-09-30 明确要求）
 
-**必须在接入系统 API 之前定义边界，不在业务代码堆完 Windows 调用以后再抽 adapter。** 此要求覆盖本主题全部系统互操作，既包括读取，也包括监听与打开系统界面。项目级原则落在 `memory/ARCHITECTURE.md` §2.2。
+**必须在接入系统 API 之前定义边界，不在业务代码堆完 Windows 调用以后再抽 adapter。** 此要求覆盖本主题全部系统互操作，既包括读取，也包括监听与打开系统界面。项目级原则落在 `.agents/memory/ARCHITECTURE.md` §2.2。
 
 按责任划分接口，不规定必须使用动态分发/插件框架；可通过 trait、枚举分发和依赖注入实现。下面是逻辑边界，实施时不必机械拆成三个顶层模块。
 

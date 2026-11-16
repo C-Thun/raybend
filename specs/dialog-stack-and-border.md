@@ -73,7 +73,7 @@ positioner: z-index: calc(var(--z-modal) + (var(--dialog-layer, 1) - 1) * 2) !im
 
 所有 `DialogFrame` 内容面、命令面板内容面、`MigrationGate` 面板使用
 `inset-ring-(length:--dialog-ring-w) inset-ring-(--dialog-ring)`。这是「无边线设计」的唯一常驻例外，
-理由与浅色主题对比度备注写进 `memory/DESIGN.md` §10.1 #9。
+理由与浅色主题对比度备注写进 `.agents/memory/DESIGN.md` §10.1 #9。
 
 ### 3.5 设计稿
 

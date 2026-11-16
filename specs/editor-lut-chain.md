@@ -1,8 +1,8 @@
 # editor 多层 LUT（应用层 / LUT chain）
 
 > 2026-10-31 开工。画稿：`design/editor.pen` → 主稿 `P1JiB` 左列 + `Components / Editor / LUT 应用层`（`pj0oo`）；
-> 规格说明：`design/editor.md` §3.1.3。需求原文与审阅：`todos/2026-10-31-lut-multilayer-ui.md`。
-> 前置（LUT 上 GPU）：`implementations/2026-10-31_lut-on-gpu.md`。
+> 规格说明：`design/editor.md` §3.1.3。需求原文与审阅：`specs/lut-multilayer-ui.md`。
+> 前置（LUT 上 GPU）：`.agents/implementations/2026-10-31_lut-on-gpu.md`。
 
 ## 0. 一句话
 

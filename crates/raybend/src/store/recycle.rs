@@ -30,7 +30,7 @@ use crate::error::Result;
 use crate::store::marking::LOCK_NO_DELETE;
 use crate::store::path_semantics::{self, PathForms};
 
-/// 回收站目录名（与 `photos/` 同级；`memory/FUNCTION-REPOSITORY.md` §1 的保留目录）。
+/// 回收站目录名（与 `photos/` 同级；`.agents/memory/FUNCTION-REPOSITORY.md` §1 的保留目录）。
 pub const RECYCLE_DIR: &str = "recycle";
 
 /// 库内相对路径 → 绝对路径（**只做拼接**，不检查存在性）。

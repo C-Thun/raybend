@@ -1,5 +1,5 @@
 /**
- * 编辑工作区的状态（`memory/ARCHITECTURE.md` §3 的状态归属）。
+ * 编辑工作区的状态（`.agents/memory/ARCHITECTURE.md` §3 的状态归属）。
  *
  * 这一层只管**编辑器自己的界面状态**，不碰照片数据：
  *
@@ -67,7 +67,7 @@ export const MAX_LUT_LAYERS = 8;
 /** 编辑区层数上限（**不含默认层**；与 Rust `store::develop::MAX_AREAS` 一致）。 */
 export const MAX_AREAS = 32;
 
-/** 控制点颜色槽位数量（`memory/DESIGN.md` §15.5；与 Rust `POINT_COLORS` 一致）。 */
+/** 控制点颜色槽位数量（`.agents/memory/DESIGN.md` §15.5；与 Rust `POINT_COLORS` 一致）。 */
 export const POINT_COLORS = 8;
 
 /**
@@ -143,7 +143,7 @@ import {
   type CropRatio,
 } from "./params.ts";
 
-/** 三个互斥的画布工具（`prompts/editor.pd`：同一时刻只有一个控制块）。 */
+/** 三个互斥的画布工具（`.agents/prompts/editor.pd`：同一时刻只有一个控制块）。 */
 export type EditorTool = "crop" | "rotate" | "compare";
 
 export const EDITOR_TOOLS: readonly EditorTool[] = ["crop", "rotate", "compare"];

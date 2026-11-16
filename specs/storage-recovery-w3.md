@@ -19,5 +19,5 @@
 - [x] 等待界面按批准画稿接入，双语 DTO 契约与命令体系决定同步。
 - [x] Rust/前端单测、编译、合成冒烟与 Windows 成套产物核对通过。
 
-勾选仅表示开发与 Agent 冒烟证据，见 `implementations/2026-09-29_storage-recovery-w3.md`。
+勾选仅表示开发与 Agent 冒烟证据，见 `.agents/implementations/2026-09-29_storage-recovery-w3.md`。
 Windows 真拔插、照片与视觉由崔总统一四波验收，步骤见 `docs/removable-storage-acceptance.md`。

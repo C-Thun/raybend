@@ -46,7 +46,7 @@ mod open_url;
 mod geo;
 /// 窗口还原（记录四角点位比例 + 屏幕身份，启动只判断一次；`specs/window-restore.md`）。
 mod window_state;
-/// debug 构建自动开 WebView2 调试口（CDP，`memory/DEBUGGING.md` §1）。发布构建不生效。
+/// debug 构建自动开 WebView2 调试口（CDP，`.agents/memory/DEBUGGING.md` §1）。发布构建不生效。
 mod webview_debug;
 mod work;
 
@@ -60,7 +60,7 @@ mod color_batch;
 pub mod dirs;
 /// 诊断目录命令（打开日志/崩溃记录所在目录；报告包与发送属 W3，未开工）。
 mod diagnostics_cmd;
-/// 渲染可行性 spike 的调试窗口（`memory/PLAN.md` A.2）。**按需建窗**，不影响主窗口。
+/// 渲染可行性 spike 的调试窗口（`specs/PLAN.md` A.2）。**按需建窗**，不影响主窗口。
 pub mod spike_viewport;
 
 /// 主窗口标签（与 `tauri.conf.json` 的窗口配置、`capabilities/default.json` 对应）。
@@ -470,7 +470,7 @@ pub fn run() {
             fullscreen::fullscreen_open,
             fullscreen::fullscreen_payload,
             fullscreen::fullscreen_close,
-            // ── 库内目录树的菜单（新建子目录 / 删除空目录，memory/FUNCTION-BROWSE.md §4.3）──
+            // ── 库内目录树的菜单（新建子目录 / 删除空目录，.agents/memory/FUNCTION-BROWSE.md §4.3）──
             dirs::dir_delete_check,
             dirs::dir_delete,
             dirs::dir_create,

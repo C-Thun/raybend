@@ -78,7 +78,7 @@
 
 ## 7. 交付物
 
-1. `implementations/YYYY-MM-DD_photo-organization-ai-w1.md`：精确时间、命令、真实结果、未测项、推荐/否决理由。
+1. `.agents/implementations/` 下 `photo-organization-ai-w1` 命名的记录（**尚未写**）：精确时间、命令、真实结果、未测项、推荐/否决理由。
 2. 可重复运行的 probe/导出说明、固定小样本与预处理/评分测试向量；敏感照片与大权重不进 Git。
 3. 单一推荐模型包的 manifest 草稿：模型与类别矩阵 hash、精确版本、I/O、预处理、阈值、词表和最小运行库要求。
 4. 模型加载缺失/错误 shape/NaN/非有限向量/损坏文件/超时的明确错误样例。
@@ -98,4 +98,4 @@
 
 未勾选项保留为实测/证据缺口，不能用编译或合成单测替代。本期路线已定案，真实图库效果与性能仍需验收；不因未满足原门槛继续扩散模型选型。
 
-当前定案交付：`implementations/2026-10-04_photo-organization-ai-tinyclip-delivery.md`；初次对照/底座证据：`implementations/2026-10-04_photo-organization-ai-foundation-and-model-gate.md`。
+当前定案交付：`.agents/implementations/2026-10-04_photo-organization-ai-tinyclip-delivery.md`；初次对照/底座证据：`.agents/implementations/2026-10-04_photo-organization-ai-foundation-and-model-gate.md`。

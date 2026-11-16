@@ -46,7 +46,7 @@
 
 | # | 做什么 | 应当看到 | 权威正文 |
 | --- | --- | --- | --- |
-| 1.1 | 新建库、再「添加已有库」指向同一个库根 | 识别为**同一个库**（按 catalog 内 ID 比对，不按路径）；不出现两份登记 | `memory/FUNCTION-REPOSITORY.md` |
+| 1.1 | 新建库、再「添加已有库」指向同一个库根 | 识别为**同一个库**（按 catalog 内 ID 比对，不按路径）；不出现两份登记 | `.agents/memory/FUNCTION-REPOSITORY.md` |
 | 1.2 | 老库升级（拿一份旧版本建的库） | 升级前自动快照、逐条事务；升级后照片/评级/编辑栈都在；旧程序打开新库被拒绝 | `specs/display-size-source.md`、`specs/database-upgrade-gate.md` |
 | 1.3 | 改盘符后「定位此库」 | 核对 ID 后接上；选错库被拒绝，原登记不被改写 | `docs/removable-storage-acceptance.md` |
 | 1.4 | 拔掉库所在移动盘 → 库设置 / 浏览 | 库变离线但仍可打开设置；释放与重连按规格，不自动接回 | 同上 |
@@ -56,7 +56,7 @@
 
 | # | 做什么 | 应当看到 | 权威正文 |
 | --- | --- | --- | --- |
-| 2.1 | 从 SD 卡 / 目录导入一批（含 RAW+JPG、中文名） | 目录树、勾选、最近目录都正常；导入进度可见、可取消 | `memory/FUNCTION-REPOSITORY.md` |
+| 2.1 | 从 SD 卡 / 目录导入一批（含 RAW+JPG、中文名） | 目录树、勾选、最近目录都正常；导入进度可见、可取消 | `.agents/memory/FUNCTION-REPOSITORY.md` |
 | 2.2 | 看导入后的目录结构 | RAW 进同名照片旁的 `_RAW/`；命名按导入模版；序号 `:SEQ` 连续、不重名 | 同上 |
 | 2.3 | 同一批再导一次，开着「避免重复导入」 | 已入库的不重复导入；关掉该开关后按冲突规则处理，不静默覆盖 | `specs/import-dedup-fingerprint.md` |
 | 2.4 | 导入时的体感（小图出现速度、滚动） | 小图**最快出现**、滚动不卡；不因「优化」越用越慢 | `AGENTS.md` §2.24、`specs/thumbnail-tiers-and-import-memory.md` |
@@ -66,23 +66,23 @@
 
 | # | 做什么 | 应当看到 | 权威正文 |
 | --- | --- | --- | --- |
-| 3.1 | tiles 网格 / 列表切换、缩放档、按时间分组 | 分组按「同一天内间隔 > 1h 断片」；比例随显示变体 | `memory/FUNCTION-BROWSE.md`、`memory/DESIGN.md` §12.7 |
-| 3.2 | 单击 / `Ctrl`+单击 / `Shift`+`Ctrl`+单击 | 选中唯一、勾选独立；反转跟随数据源；`Shift+Ctrl` 回退到当前场景单击（不是新操作） | `memory/FUNCTION-BROWSE.md` §5.2.4 |
+| 3.1 | tiles 网格 / 列表切换、缩放档、按时间分组 | 分组按「同一天内间隔 > 1h 断片」；比例随显示变体 | `.agents/memory/FUNCTION-BROWSE.md`、`.agents/memory/DESIGN.md` §12.7 |
+| 3.2 | 单击 / `Ctrl`+单击 / `Shift`+`Ctrl`+单击 | 选中唯一、勾选独立；反转跟随数据源；`Shift+Ctrl` 回退到当前场景单击（不是新操作） | `.agents/memory/FUNCTION-BROWSE.md` §5.2.4 |
 | 3.3 | view 里缩放、平移、适应窗口、100%、改窗口大小 | **只有一次载入**；上述动作**不重新出图、不弹载入提示**；100% 是 1:1 | `AGENTS.md` §2.25/§2.26 |
 | 3.4 | 切 SOOC / RAW / 各条定稿 | flowinfo 的尺寸与 MP、view 画幅、tiles 比例**一起**变，且毫秒级 | `specs/display-size-source.md` |
-| 3.5 | 全屏（`F11`）、compare（最多 4 张） | 全屏是独立窗口、无 UI；compare 超过 4 张时提示只比最近 4 张 | `memory/FUNCTION-BROWSE.md` |
+| 3.5 | 全屏（`F11`）、compare（最多 4 张） | 全屏是独立窗口、无 UI；compare 超过 4 张时提示只比最近 4 张 | `.agents/memory/FUNCTION-BROWSE.md` |
 | 3.6 | 胶片带：尺寸拖拽、滚轮、`Ctrl`+滚轮 | 只有一套尺寸组件；偏好按工作流分开记；切换照片不重建 | `AGENTS.md` §11.4 |
 
 ## 4. 标记与元数据
 
 | # | 做什么 | 应当看到 | 权威正文 |
 | --- | --- | --- | --- |
-| 4.1 | 星级 / 色标 / 旗标 / 赞踩，单选与多选 | 立即生效；`Ctrl+Z` 撤销；tiles 与右栏同步 | `memory/FUNCTION-BROWSE.md` |
+| 4.1 | 星级 / 色标 / 旗标 / 赞踩，单选与多选 | 立即生效；`Ctrl+Z` 撤销；tiles 与右栏同步 | `.agents/memory/FUNCTION-BROWSE.md` |
 | 4.2 | 照片标签与**目录标签** | 两者独立：目录标签**绝不**传播成照片标签，也不进自动桶 | `specs/photo-organization.md` |
 | 4.3 | 作者 / 描述 / 国家 / 省州 / 城市 / 具体地点 | 点值 → 行内输入（focus 直接可打字）+ 建议列表（最近 20 ∪ 库内已有值）；Esc 先关列表；中文输入法回车不误提交 | `specs/browse-info-fields.md` |
 | 4.4 | 多选时改一个字段 | 只改锚点那张；行尾「应用到所选 N 张」才批量写，落库后 Toast | 同上 |
 | 4.5 | GPS 一项 | **有坐标才显示**（只读 + 复制 + 地图入口）；无坐标**整行不出现**；有坐标且地点有空缺时给「按 GPS 填入地点」，只填空、一步撤销 | 同上 + `specs/browse-info-fields.md` §3.5 |
-| 4.6 | 字段超长 / 撞上限 | 文字字段 2000 字截断；标签 5000、层数 32、LUT 8、定稿 32 到顶时给明确反馈而不是静默失败 | `memory/LIMITS.md` |
+| 4.6 | 字段超长 / 撞上限 | 文字字段 2000 字截断；标签 5000、层数 32、LUT 8、定稿 32 到顶时给明确反馈而不是静默失败 | `.agents/memory/LIMITS.md` |
 
 ## 5. 相片整理：标签 / 桶 / AI
 
@@ -100,11 +100,11 @@
 | # | 做什么 | 应当看到 | 权威正文 |
 | --- | --- | --- | --- |
 | 6.1 | 常规调整 + 自动调整 + 曲线 | 画面即时变化；自动调整只作用于 `默认` 层 | `specs/editor-area.md` |
-| 6.2 | 编辑区：新建全图层 / 控制点、改名、上下移、删除、眼睛 | 列表自上而下 = 计算顺序、新层追加末尾；`默认` 层不可删；层数 32 到顶两个「新建」变灰 | `specs/editor-area.md` §10、`memory/LIMITS.md` |
+| 6.2 | 编辑区：新建全图层 / 控制点、改名、上下移、删除、眼睛 | 列表自上而下 = 计算顺序、新层追加末尾；`默认` 层不可删；层数 32 到顶两个「新建」变灰 | `specs/editor-area.md` §10、`.agents/memory/LIMITS.md` |
 | 6.3 | 控制点：拖动范围 handle、重新取样 | 种子在创建时冻结；引线按可用空间翻边；不显示影响面（有意为之） | `specs/editor-area.md` |
 | 6.4 | LUT 链：加多层、改强度、开关、拖动排序 | 拖动排序手感与其它行一致；顺序改变画面就变；8 层到顶「加入」禁用 | `specs/editor-lut-chain.md` |
 | 6.5 | 预设：新建目录/预设、应用、拖拽、LUT 丢失 | 应用后选中态与配置哈希一致；丢 LUT 时不动当前值并提示 | `specs/editor-presets.md` |
-| 6.6 | 定稿：命名、再看「最近编辑」、上限 | 同配置不重复；32 个到顶按钮变灰并说明；每条定稿有自己的预览 | `memory/LIMITS.md`、`specs/issue-xmp-contract.md` |
+| 6.6 | 定稿：命名、再看「最近编辑」、上限 | 同配置不重复；32 个到顶按钮变灰并说明；每条定稿有自己的预览 | `.agents/memory/LIMITS.md`、`specs/issue-xmp-contract.md` |
 | 6.7 | 撤销：拖动 / 松手 / 归位 / 重置 / 开关 / 应用 / 确认 | **只有 confirm 进撤销栈**；拖动途中不落库、不建快照；任何操作节点都能撤销一步 | `AGENTS.md` §2.21 |
 | 6.8 | 几何：裁切、旋转、方向 | 首帧画幅正确、真帧到达不跳变；输出尺寸随裁剪 | `specs/editor-session-pipeline.md` §3.5 |
 | 6.9 | 色彩：指定色彩状态、显示状态提示 | 显示状态与警告正确；关闭后恢复；照片身份（哈希/侧车）不变 | `specs/cm-w5.md`、`specs/color-management.md` |
@@ -158,7 +158,7 @@
 | 10.1 | 窗口还原：单屏 / 双屏不同 DPI / 改分辨率 / 拔副屏 / 最大化、最小化关闭 | 各自回原位与原尺寸（±2px）；原屏不可识别回主屏留白；任何部分不出屏 | `specs/window-restore.md` |
 | 10.2 | 双击图标再开一个 | 第二个实例退出、已有窗口被聚焦 | 同上 |
 | 10.3 | `Ctrl+K` 命令面板、快捷键设置 | 该有的命令都在；场景列可搜；真冲突拦保存，跨场景同键放行 | `specs/command-scenes.md` |
-| 10.4 | 密度两档 / 主题 / 标题栏菜单 | 间距变、字号与图标不变；菜单是逃生通道，不是功能索引 | `memory/DESIGN.md`、`AGENTS.md` §11.5 |
+| 10.4 | 密度两档 / 主题 / 标题栏菜单 | 间距变、字号与图标不变；菜单是逃生通道，不是功能索引 | `.agents/memory/DESIGN.md`、`AGENTS.md` §11.5 |
 
 ## 11. 诊断、更新与首启
 
@@ -174,7 +174,7 @@
 
 | # | 做什么 | 应当看到 | 权威正文 |
 | --- | --- | --- | --- |
-| 12.1 | 大库滚动（尽量接近 15 万张量级，或至少几万） | tiles 滚动不卡；384 小图缓存不因容量抖动 | `AGENTS.md` §6.5、`memory/LIMITS.md` §2 |
+| 12.1 | 大库滚动（尽量接近 15 万张量级，或至少几万） | tiles 滚动不卡；384 小图缓存不因容量抖动 | `AGENTS.md` §6.5、`.agents/memory/LIMITS.md` §2 |
 | 12.2 | 连续看图几十张 | 内存不持续上涨（库外真身只留 10 张）；切图不重复解码同一张 | `AGENTS.md` §2.24 |
 | 12.3 | 编辑时的响应 | 参数拖动跟手、确认后落库；缓存目录不因频繁编辑爆量（真身/占位各留最新 2 份） | `AGENTS.md` §6.5 |
 
@@ -191,15 +191,15 @@
 
 | 区域 | 权威正文 |
 | --- | --- |
-| 库与导入 | `memory/FUNCTION-REPOSITORY.md`、`specs/thumbnail-tiers-and-import-memory.md`、`docs/removable-storage-acceptance.md` |
-| 浏览与看图 | `memory/FUNCTION-BROWSE.md`、`specs/display-size-source.md`、`AGENTS.md` §2.25/§2.26 |
+| 库与导入 | `.agents/memory/FUNCTION-REPOSITORY.md`、`specs/thumbnail-tiers-and-import-memory.md`、`docs/removable-storage-acceptance.md` |
+| 浏览与看图 | `.agents/memory/FUNCTION-BROWSE.md`、`specs/display-size-source.md`、`AGENTS.md` §2.25/§2.26 |
 | 元数据 | `specs/browse-info-fields.md` |
 | 相片整理 | `specs/photo-organization.md`、`-phase1.md`、`-phase2.md`、`docs/ai/tinyclip-v1/README.md` |
 | 编辑 | `specs/editor-area.md`、`specs/editor-lut-chain.md`、`specs/editor-presets.md`、`specs/editor-session-pipeline.md`、`specs/color-management.md` |
 | 导出 | `specs/toolsbar-compact-and-export-gallery.md`、`specs/export-issue-ordinal.md`、`specs/M4-export-refinement.md` |
 | 回收站 | `specs/library-recycle-bin.md` |
 | XMP | `specs/xmp-sidecar.md` §10、`specs/xmp-audit-tool.md`、`specs/issue-xmp-contract.md` |
-| 外壳/窗口 | `specs/window-restore.md`、`specs/command-scenes.md`、`memory/DESIGN.md` |
+| 外壳/窗口 | `specs/window-restore.md`、`specs/command-scenes.md`、`.agents/memory/DESIGN.md` |
 | 诊断/更新 | `specs/logging-and-crash-report.md`、`specs/update-flow-v2.md`、`specs/first-start-system-preferences.md` |
-| 上限 | `memory/LIMITS.md` |
+| 上限 | `.agents/memory/LIMITS.md` |
 | 出包与发布 | `docs/release.md` |

@@ -10,4 +10,4 @@
 尺寸规则：百分比缩小 1–100 整数，100 等于保持不变；最大边 1–65535 整数，仅缩小不放大。数字框短宽，单位固定在右侧。新预设默认 WebP、原尺寸，模板 `:CYEAR-:CMONTH-:CDAY/:FILENAME`。
 旧预设通过 v1→v2 显式迁移保留名称/ID/路径等设置；旧 TIFF 转为同样无损 RGB16 的 PNG。TIFF 编码能力保留在内部，仅供外部编辑入口，普通导出不再接受 TIFF。
 
-完成记录：`implementations/2026-09-26_m4-export-refinement.md`。
+完成记录：`.agents/implementations/2026-09-26_m4-export-refinement.md`。

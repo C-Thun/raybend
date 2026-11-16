@@ -1,5 +1,5 @@
 /**
- * 库的**中央状态**（`memory/FUNCTION-REPOSITORY.md` §5）。
+ * 库的**中央状态**（`.agents/memory/FUNCTION-REPOSITORY.md` §5）。
  *
  * ## 为什么要有它（人类 2026-09-16 的原话）
  *

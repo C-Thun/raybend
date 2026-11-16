@@ -1,0 +1,37 @@
+version = 1
+tool = "1.0.0"
+created = "2026-11-15T04:21:15+08:00"
+updated = "2026-11-15T04:21:15+08:00"
+profile = "core"
+modules = [ "specs", "design", "docs", "legal" ]
+roots = []
+
+[[managed]]
+path = ".agents/memory/README.md"
+sha256 = "d9c0fd144f60a3d9a974f0423c27f41a762a3db9549a10d0ae51d8c92c66f2d4"
+template = "memory-readme"
+template_sha256 = "d9c0fd144f60a3d9a974f0423c27f41a762a3db9549a10d0ae51d8c92c66f2d4"
+
+[[managed]]
+path = ".agents/README.md"
+sha256 = "8d094edcd4da361db83cdcaef7dbaf16671e11a3bd3190175794446ff778c423"
+template = "signpost"
+template_sha256 = "8d094edcd4da361db83cdcaef7dbaf16671e11a3bd3190175794446ff778c423"
+
+[[managed]]
+path = ".agents/uat/README.md"
+sha256 = "ff044d8aac2a57f7c7f5da0eb37c40017b0f631913408abd07e6f441c60e0161"
+template = "uat-readme"
+template_sha256 = "ff044d8aac2a57f7c7f5da0eb37c40017b0f631913408abd07e6f441c60e0161"
+
+[[managed]]
+path = ".agents/framework/.gitignore"
+sha256 = "662701cb1683be0bb8a5648e949f77d846e3e3ea560a7609ec3a0ebb8ad8f07b"
+template = "state-gitignore"
+template_sha256 = "662701cb1683be0bb8a5648e949f77d846e3e3ea560a7609ec3a0ebb8ad8f07b"
+
+[[migrations]]
+at = "2026-11-15T04:21:15+08:00"
+to = "1"
+notes = "adopt"
+
