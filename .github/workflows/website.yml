@@ -42,8 +42,15 @@ concurrency:
 
 jobs:
   build:
-    # 预发布版不上官网（页面只展示正式版）
-    if: ${{ github.event_name != 'release' || github.event.release.prerelease == false }}
+    # 预发布版不上官网（页面只展示正式版）。
+    # 另：GitHub Pages 按 `pages_build_version`（= 部署时的 commit SHA）去重 —— 同一个
+    # commit 的第二次部署会被当成「已构建过」直接跳过（2026-11-16 v0.2.0 实测：
+    # 发版提交先被 push 触发部署成 v0.1.4，随后 release 事件重建出 v0.2.0，
+    # 两次 SHA 相同 → 线上一直是 v0.1.4）。所以**发版提交的 push 不构建**，
+    # 让 release 事件成为该 SHA 的唯一部署方。
+    if: >-
+      ${{ (github.event_name != 'release' || github.event.release.prerelease == false) &&
+      !(github.event_name == 'push' && contains(github.event.head_commit.message, '发布版本')) }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

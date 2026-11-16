@@ -35,7 +35,7 @@ export function githubReleasePlan(directory) {
   const metadata = releaseMetadata({ manifest, artifacts, baseUrl, withUpdater: files.includes(updateName), unsigned: index.authenticode === 'unsigned', notes: releaseNotesSummary(releaseNotes) });
   if (readFileSync(join(root, 'SHA256SUMS'), 'utf8') !== metadata.checksums) throw new Error('校验和与安装器索引不一致');
   if (metadata.update && JSON.stringify(JSON.parse(readFileSync(join(root, updateName), 'utf8'))) !== JSON.stringify(metadata.update)) {
-    throw new Error('更新清单与最终安装器/签名/下载地址不一致');
+    throw new Error('更新清单与最终安装器/签名/下载地址不一致（含本版说明；目录若是在说明接入 latest.json 之前生成的，请重新构建，不要手改 latest.json）');
   }
   const assets = ['SHA256SUMS', 'release-index.json', 'raybend-build.json'];
   for (const file of artifacts) {

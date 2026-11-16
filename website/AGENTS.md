@@ -181,9 +181,13 @@ JSON-LD `SoftwareApplication`）—— 这是**爬虫唯一能直接读到的东
 
 | 触发 | 做什么 |
 | --- | --- |
-| push 到 `master`（只改 `website/**` 或该 workflow 文件时） | 构建 + 发布 |
+| push 到 `master`（只改 `website/**` 或该 workflow 文件时） | 构建 + 发布（**发版提交除外**，见下） |
 | **正式版 release 发布**（`release: published`，prerelease 跳过） | 重新构建：把新版本号与安装包直链刷上官网 |
 | `workflow_dispatch`（可填 `tag` 覆盖版本号） | 手动重建 |
+
+❗ **同一个 commit 只能部署一次**（2026-11-16 v0.2.0 实测踩到）：GitHub Pages 按 `pages_build_version`（= 部署时的 commit SHA）去重，同一 SHA 的第二次部署会被判定为「已构建过」而跳过——哪怕两次的 artifact 内容不同。发版时「推送发版提交」和「发布 release」是**同一个 commit**，于是先到的那次（push，注入的是上一版版本号）占住这个 SHA，release 事件重建出的正确产物永远上不去：线上一直显示旧版本，而 Actions 全绿。
+
+因此 workflow 里给 `build` job 加了条件：**commit message 含「发布版本」的 push 不构建**，把该 SHA 的唯一部署权让给 release 事件。做别的事情时别绕开这条 —— 手动 `gh workflow run` 同一个 SHA 同样会被去重（要刷新只能有新 commit）。
 
 流程是 `pnpm install --frozen-lockfile` → `test:run` + `typecheck` + `lint` → `pnpm build`（注入版本）
 → `actions/configure-pages@v6`（`enablement: true`，尝试自动开 Pages）→ `upload-pages-artifact@v5`（路径

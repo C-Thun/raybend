@@ -147,6 +147,8 @@ pnpm release test --win-msi --unsigned --with-updater --dry-run  # 私钥可读 
 gh auth status && git status --porcelain && git log --oneline -1 # 登录 OK、工作树干净、HEAD 就是要发的提交
 ```
 
+**另一个只在发版时才会踩的坑**：GitHub Pages 按 `pages_build_version`（部署时的 commit SHA）去重，同一 SHA 只认第一次部署。发版提交的「push」与「release published」是同一个 commit —— push 先到就用旧版本号占住该 SHA，官网会一直显示上一版（Actions 却是绿的）。workflow 已改为「commit message 含『发布版本』的 push 不构建」，把部署权让给 release 事件；发版后请打开官网确认版本号，别只看 Actions 结论（详见 `website/AGENTS.md` §5）。
+
 再加一条**纪律**：正式发布一旦发动，**构建与发布期间不要动工作树**（任何改动、哪怕已提交都会让发布在校验处中断）。
 细则见 §7.4，事故见 §8。
 
