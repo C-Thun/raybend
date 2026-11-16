@@ -271,7 +271,7 @@ pnpm release:publish release-out/v0.1.3 --execute # 发布：提交 / tag / 推�
 | `test` | 不升版的自测通道：产物进 `release-out/test-<时间>/`，**不能公开上传** |
 | `--win-msi` / `--win-nsis` | 安装器类型，可同时给（只编译一次，打两种）；**beta 与预发布只能 NSIS**（MSI 数值版本区分不了 beta） |
 | `--unsigned` | 明确接受无 Authenticode 签名（官网直下路线） |
-| `--with-updater` | 生成带签名更新的产物（`.sig` + `latest.json`）；需要 §3.1 的密钥 |
+| `--with-updater` | 生成带签名更新的产物（`.sig` + `latest.json`）；需要 §3.1 的密钥。`latest.json` 的 `notes` 取 `RELEASE-NOTES.md` 里「## 本版变更」那一段（应用内更新弹窗直接显示它；写死的空串已于 2026-11-17 取消） |
 | `--no-updater` | 显式声明「这次正式版不带更新产物」。默认会被断链防护拦住：仓里配了更新公钥却没 `--with-updater` 时，新版一公开 `latest.json` 就 404（§8） |
 | `--ai=auto|required|off` | AI 模型外挂策略（附录 D） |
 | `--no-crates` | 这次不同步 crates.io |
@@ -289,6 +289,7 @@ Windows cargo 构建主程序与 worker → 打所选安装器 → 核对嵌入�
 生成全新的 `release-out/v版本/`。
 产物目录含：安装器、可选 `.sig`、`SHA256SUMS`、`release-index.json`、`raybend-build.json`、
 可选 `latest.json` 与 `RELEASE-NOTES.md`；**只收本版文件**，缺目标安装器直接失败，旧包不混入，目录必须全新。
+发布前会重算 `latest.json` 与磁盘上的逐字节比对（含 `notes`），任何不一致都拒绝上传 —— 所以「本版变更」的提取逻辑只许有一份（`scripts/lib/release-artifacts.mjs::releaseNotesSummary`）。
 
 **第二条（发布）**：核对安装器哈希、更新签名与地址、版本事务、许可锁摘要、构建时源码快照 →
 只自动提交 `package.json` / `Cargo.toml` / `Cargo.lock` / `public/legal/third-party.json` →

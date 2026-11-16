@@ -1,6 +1,6 @@
 import { readFileSync, readdirSync, lstatSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { releaseMetadata } from './release-artifacts.mjs';
+import { releaseMetadata, releaseNotesSummary } from './release-artifacts.mjs';
 import { sha256 } from './release-files.mjs';
 
 /** 只核对本地待上传目录和生成命令；永不调用 git push 或 gh。 */
@@ -30,7 +30,9 @@ export function githubReleasePlan(directory) {
   });
   const tag = `v${index.version}`;
   const baseUrl = `https://github.com/C-Thun/raybend/releases/download/${tag}/`;
-  const metadata = releaseMetadata({ manifest, artifacts, baseUrl, withUpdater: files.includes(updateName), unsigned: index.authenticode === 'unsigned' });
+  // 与 finalize 用同一份 RELEASE-NOTES.md 的「本版变更」段，否则下面的字节比对必然不等。
+  const releaseNotes = readFileSync(join(root, 'RELEASE-NOTES.md'), 'utf8');
+  const metadata = releaseMetadata({ manifest, artifacts, baseUrl, withUpdater: files.includes(updateName), unsigned: index.authenticode === 'unsigned', notes: releaseNotesSummary(releaseNotes) });
   if (readFileSync(join(root, 'SHA256SUMS'), 'utf8') !== metadata.checksums) throw new Error('校验和与安装器索引不一致');
   if (metadata.update && JSON.stringify(JSON.parse(readFileSync(join(root, updateName), 'utf8'))) !== JSON.stringify(metadata.update)) {
     throw new Error('更新清单与最终安装器/签名/下载地址不一致');
@@ -43,7 +45,7 @@ export function githubReleasePlan(directory) {
   if (metadata.update) assets.push(updateName);
   const expected = new Set([...assets, 'RELEASE-NOTES.md']);
   if (files.some(name => !expected.has(name))) throw new Error('待上传目录含旧清单或未知文件，请使用新的输出目录');
-  if (!readFileSync(join(root, 'RELEASE-NOTES.md'), 'utf8').trim()) throw new Error('发布说明不能为空');
+  if (!releaseNotes.trim()) throw new Error('发布说明不能为空');
   return { tag, gitHash: index.gitHash, version: index.version, prerelease: index.channel === 'beta', assets: assets.map(name => join(root, name)), notes: join(root, 'RELEASE-NOTES.md') };
 }
 

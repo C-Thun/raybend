@@ -4,6 +4,10 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { runRelease as runReleaseRaw } from '../release.mjs';
+// Windows 侧 cargo-tauri 必须与前端 CLI 版本一致（release.mjs 的硬闸）：
+// 这里读真实版本而不是写死，否则升级 @tauri-apps/cli 后所有 mock 都会假失败（2026-11-10 踩过）。
+const CLI_VERSION = JSON.parse(readFileSync(new URL('../../node_modules/@tauri-apps/cli/package.json', import.meta.url), 'utf8')).version;
+const TAURI_CLI = `tauri-cli ${CLI_VERSION}`;
 // 测试必须 hermetic：默认不吃开发机环境（签名私钥、dav1d 路径等）。
 const runRelease = options => runReleaseRaw({ env: {}, ...options });
 function fixture(){
@@ -70,7 +74,7 @@ for(const targets of [['msi'],['nsis'],['nsis','msi']])test(`Windows ${targets.j
     assert.equal(config.build.beforeBuildCommand,null);
     assert.match(opts.env.WSLENV,/CARGO_TARGET_DIR/);assert.equal(opts.env.RAYBEND_CHANNEL,'test');assert.equal(opts.env.RAYBEND_PHOTO_AI,'0');
    }
-   return 'tauri-cli 2.11.4';
+   return TAURI_CLI;
   }
   assert.equal(cmd,'pnpm');
   if(args[0]==='licenses:generate'||args[0]==='check:win'||args[0]==='ai:prepare')return;
@@ -111,7 +115,7 @@ test('Windows 构建/核查/收口失败时恢复版本并释放锁，不能收�
     if(cmd==='wslpath')throw new Error('unexpected wslpath');
     if(cmd==='cmd.exe'){
      if(args.at(-1).endsWith('.cmd')&&failure==='bundle')throw new Error('bundle failed');
-     return 'tauri-cli 2.11.4';
+     return TAURI_CLI;
     }
     if(args[0]==='build'){mkdirSync(join(f.root,'dist'));writeFileSync(join(f.root,'dist/index.html'),'new');}
     if(args[0]==='check:win'&&failure==='check')throw new Error('check failed');
@@ -129,7 +133,7 @@ test('Windows 锁竞争和已有输出在升版、前端构建前停止',()=>{
   const original=readFileSync(join(f.root,'package.json'),'utf8');
   const run=(cmd,args)=>{
    if(cmd==='git')return args[0]==='status'?'':'abcdef012345';
-   if(cmd==='cmd.exe')return 'tauri-cli 2.11.4';
+   if(cmd==='cmd.exe')return TAURI_CLI;
    if(cmd==='wslpath')throw new Error('unexpected wslpath');
    throw new Error('should not build');
   };
@@ -156,7 +160,7 @@ test('自定义构建目录优先级和 Windows 子进程的私钥/dav1d/target 
    }
    if(cmd==='cmd.exe'){
     if(args.at(-1).endsWith('.cmd'))delivered=opts.env;
-    return 'tauri-cli 2.11.4';
+    return TAURI_CLI;
    }
    if(args[0]==='build'){mkdirSync(join(f.root,'dist/test-build'),{recursive:true});writeFileSync(join(f.root,'dist/test-build/index.html'),'frontend');}
   };
@@ -176,7 +180,7 @@ test('自定义构建目录优先级和 Windows 子进程的私钥/dav1d/target 
 test('required AI failure precedes version edits and frontend, releases locks; dry-run never materializes',()=>{
  const f=fixture();try{
   const original=readFileSync(join(f.root,'package.json'),'utf8'),seen=[];
-  const run=(cmd,args)=>{if(cmd==='git')return args[0]==='status'?'':'abcdef012345';if(cmd==='cmd.exe')return 'tauri-cli 2.11.4';throw new Error('must not build');};
+  const run=(cmd,args)=>{if(cmd==='git')return args[0]==='status'?'':'abcdef012345';if(cmd==='cmd.exe')return TAURI_CLI;throw new Error('must not build');};
   const aiResolver=opts=>{seen.push(opts);if(opts.mode==='required')throw new Error('AI missing');return {enabled:false,features:['custom-protocol'],resources:{}};};
   assert.throws(()=>runRelease({root:f.root,discover:()=>f.paths,argv:['patch','--win-msi','--unsigned','--ai=required'],run,log:()=>{},aiResolver}),/AI missing/);
   assert.equal(readFileSync(join(f.root,'package.json'),'utf8'),original);assert.equal(existsSync(`${f.mirror}.lock`),false);
@@ -190,7 +194,7 @@ test('一键发版：--publish 在收口后执行发布；构建失败时不发�
   const run=(cmd,args)=>{
    if(cmd==='git')return args[0]==='status'?'':'abcdef012345';
    if(cmd==='wslpath')throw new Error('unexpected wslpath');
-   if(cmd==='cmd.exe'){if(args.at(-1).endsWith('.cmd')){if(failBundle)throw new Error('bundle failed');return '';}return 'tauri-cli 2.11.4';}
+   if(cmd==='cmd.exe'){if(args.at(-1).endsWith('.cmd')){if(failBundle)throw new Error('bundle failed');return '';}return TAURI_CLI;}
    assert.equal(cmd,'pnpm');if(args[0]==='licenses:generate'||args[0]==='check:win')return;
    assert.equal(args[0],'build');mkdirSync(join(f.root,'dist'),{recursive:true});writeFileSync(join(f.root,'dist/index.html'),'synthetic');
   };
@@ -212,7 +216,7 @@ test('发布步骤失败不回滚版本写入（工作树留在发布提交上�
   const run=(cmd,args)=>{
    if(cmd==='git')return args[0]==='status'?'':'abcdef012345';
    if(cmd==='wslpath')throw new Error('unexpected wslpath');
-   if(cmd==='cmd.exe')return args.at(-1).endsWith('.cmd')?'':'tauri-cli 2.11.4';
+   if(cmd==='cmd.exe')return args.at(-1).endsWith('.cmd')?'':TAURI_CLI;
    assert.equal(cmd,'pnpm');if(args[0]==='licenses:generate'||args[0]==='check:win')return;
    assert.equal(args[0],'build');mkdirSync(join(f.root,'dist'),{recursive:true});writeFileSync(join(f.root,'dist/index.html'),'synthetic');
   };
@@ -253,7 +257,7 @@ test('unsigned 且无 --with-updater 时忽略环境里的更新私钥（不调 
   const run=(cmd,args)=>{
    if(cmd==='git')return args[0]==='status'?'':'abcdef012345';
    if(cmd==='wslpath'){sawWslpath=true;throw new Error('unexpected wslpath');}
-   if(cmd==='cmd.exe')return 'tauri-cli 2.11.4';
+   if(cmd==='cmd.exe')return TAURI_CLI;
    if(cmd==='pnpm'){
     if(args[0]==='licenses:generate'||args[0]==='ai:prepare'||args[0]==='check:win')return;
     if(args[0]==='build'){mkdirSync(join(f.root,'dist/test-build'),{recursive:true});writeFileSync(join(f.root,'dist/test-build/index.html'),'synthetic');}

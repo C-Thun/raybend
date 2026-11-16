@@ -14,3 +14,23 @@ test('非法构建时间、预览标签、非安装器与 gh 标签分隔符拒�
  for(const changes of [{builtAt:'bad'},{channel:'beta',version:'1.2.3'}])assert.throws(()=>releaseMetadata({manifest:{...manifest,...changes},artifacts:[file]}));
  for(const name of ['notes.zip','RayBend#label.exe','RayBend\t.exe','secret\0.exe'])assert.throws(()=>releaseMetadata({manifest,artifacts:[{...file,name}]}));
 });
+
+test('更新说明取自 RELEASE-NOTES 的本版变更段，写入方与上传方一致', async () => {
+ const { releaseNotesSummary, MAX_UPDATE_NOTES_CHARS } = await import('./release-artifacts.mjs');
+ const notes = '# RayBend 9.9.9\n\nWindows x64 · release\n\n签名说明。\n\n## 本版变更\n\n- 功能 A\n- 修复 B\n\n## 校验与文档\n\n下载 SHA256SUMS。\n';
+ assert.equal(releaseNotesSummary(notes), '- 功能 A\n- 修复 B');
+ // 没有这一版说明时正文是提交链接 —— 弹窗里不该显示链接
+ assert.equal(releaseNotesSummary('# RayBend 9.9.9\n\n## 本版变更\n\n详见提交记录：https://example.org/commits\n\n## 校验与文档\n\nx\n'), '');
+ assert.equal(releaseNotesSummary('没有本版变更段'), '');
+ assert.equal(releaseNotesSummary(''), '');
+ // 超长时截断并留省略标记，不超过上限
+ const long = '# x\n\n## 本版变更\n\n' + Array.from({ length: 4000 }, (_, i) => `第 ${i} 行内容`).join('\n') + '\n';
+ const cut = releaseNotesSummary(long);
+ assert.ok(cut.length <= MAX_UPDATE_NOTES_CHARS + 2, `截断后仍超长：${cut.length}`);
+ assert.ok(cut.endsWith('…'));
+
+ const withNotes = releaseMetadata({ manifest, artifacts: [file], baseUrl: 'https://example.org/v1.2.3/', withUpdater: true, notes: '- 功能 A' });
+ assert.equal(withNotes.update.notes, '- 功能 A');
+ const empty = releaseMetadata({ manifest, artifacts: [file], baseUrl: 'https://example.org/v1.2.3/', withUpdater: true });
+ assert.equal(empty.update.notes, '');
+});
